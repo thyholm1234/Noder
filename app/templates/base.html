@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Noder{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <a href="/" class="logo">&#9835; Noder</a>
+            </div>
+            <nav class="sidebar-nav">
+                {% if request.session.get('role') == 'admin' %}
+                <a href="/admin/dashboard" class="nav-link {% if active == 'dashboard' %}active{% endif %}">
+                    <span class="nav-icon">&#9776;</span> Dashboard
+                </a>
+                <a href="/admin/choirs" class="nav-link {% if active == 'choirs' %}active{% endif %}">
+                    <span class="nav-icon">&#9834;</span> Kor
+                </a>
+                <a href="/admin/songs" class="nav-link {% if active == 'songs' %}active{% endif %}">
+                    <span class="nav-icon">&#9836;</span> Sange
+                </a>
+                {% elif request.session.get('role') == 'user' %}
+                <a href="/user/dashboard" class="nav-link {% if active == 'dashboard' %}active{% endif %}">
+                    <span class="nav-icon">&#9836;</span> Mine Sange
+                </a>
+                {% endif %}
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sidebar-identity">
+                    {% if request.session.get('role') == 'user' %}
+                    <div class="sidebar-pill">&#128100; {{ request.session.get('display_name', '') }}</div>
+                    {% elif request.session.get('role') == 'admin' %}
+                    <div class="sidebar-pill">&#128737; Admin</div>
+                    {% endif %}
+                    <a href="/logout" class="sidebar-pill sidebar-pill--logout">&#128682; Log ud</a>
+                </div>
+                {% if request.session.get('role') == 'admin' %}
+                {% set storage = get_storage() %}
+                <div class="storage-widget">
+                    <div class="storage-label">Lagerplads</div>
+                    <div class="storage-bar">
+                        <div class="storage-bar-fill{% if storage.pct > 90 %} storage-bar-danger{% elif storage.pct > 70 %} storage-bar-warn{% endif %}" style="width:{{ storage.pct }}%"></div>
+                    </div>
+                    <div class="storage-details">
+                        {{ storage.total_display }} / {{ storage.quota_display }}
+                    </div>
+                    <div class="storage-breakdown">
+                        PDF: {{ storage.pdf_display }} &middot; Lyd: {{ storage.audio_display }}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </aside>
+        <main class="content">
+            {% if flash %}
+            <div class="flash-message">{{ flash }}</div>
+            {% endif %}
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+    <script src="/static/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

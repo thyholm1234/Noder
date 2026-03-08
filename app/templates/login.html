@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Log ind - Noder</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <h1>&#9835; Noder</h1>
+                <p>Deling af noder og stemmer</p>
+            </div>
+            {% if error %}
+            <div class="login-error">{{ error }}</div>
+            {% endif %}
+            <form method="post" action="/login" class="login-form">
+                <div class="form-group">
+                    <label for="username">Brugernavn</label>
+                    <input type="text" id="username" name="username" required autofocus
+                           placeholder="Indtast brugernavn">
+                </div>
+                <div class="form-group">
+                    <label for="password">Adgangskode</label>
+                    <input type="password" id="password" name="password" required
+                           placeholder="Indtast adgangskode">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Log ind</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+
+{% block title %}{{ song.title }} - Noder{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb">
+        <a href="/user/dashboard">Mine Sange</a> &rsaquo; {{ song.title }}
+    </div>
+    <h1>{{ song.title }}</h1>
+    {% if song.composer %}<p class="subtitle">{{ song.composer }}</p>{% endif %}
+</div>
+
+<!-- Description -->
+{% if song.description %}
+<div class="card">
+    <h2>&#128203; Om sangen</h2>
+    <div class="song-description">{{ song.description }}</div>
+</div>
+{% endif %}
+
+<!-- Tags -->
+{% if song.tags %}
+<div class="card mt-2">
+    <h2>Tags</h2>
+    <div class="tag-list">
+        {% for tag in song.tags.split(',') %}
+        <span class="tag-badge">{{ tag.strip() }}</span>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Links -->
+{% if song.links %}
+<div class="card mt-2">
+    <h2>&#128279; Links</h2>
+    <ul class="link-list">
+        {% for link in song.links %}
+        <li>
+            <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" class="link-url">
+                {{ link.label or link.url }}
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<!-- PDF viewer -->
+{% if pdf_files %}
+<div class="card mt-2">
+    <h2>Noder</h2>
+    <div class="pdf-tabs">
+        <div class="tab-bar" role="tablist">
+            {% for f in pdf_files %}
+            <button class="tab-btn{% if loop.first %} tab-btn--active{% endif %}"
+                    role="tab"
+                    onclick="switchPdfTab(this, 'user-pdf-{{ f.id }}')">
+                {{ f.part_name or f.original_filename }}
+            </button>
+            {% endfor %}
+        </div>
+        {% for f in pdf_files %}
+        <div class="tab-panel{% if loop.first %} tab-panel--active{% endif %}" id="user-pdf-{{ f.id }}">
+            <div class="pdf-viewer">
+                <iframe src="/user/files/{{ f.id }}#toolbar=1&navpanes=0" type="application/pdf"></iframe>
+            </div>
+            <div class="file-actions mt-1">
+                <a href="/user/files/{{ f.id }}" target="_blank" class="btn btn-sm">Åbn i ny fane</a>
+                <a href="/user/files/{{ f.id }}?download=1" class="btn btn-sm">&#11015; Download PDF</a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Audio players -->
+{% if audio_files %}
+<div class="card mt-2">
+    <h2>Stemmer</h2>
+    <div class="audio-list">
+        {% for f in audio_files %}
+        <div class="audio-card">
+            <div class="audio-header">
+                <span class="audio-icon">&#127925;</span>
+                <span class="audio-title">{{ f.part_name or f.original_filename }}</span>
+            </div>
+            <audio controls preload="metadata" class="audio-full">
+                <source src="/user/files/{{ f.id }}" type="audio/mpeg">
+                Din browser understøtter ikke lyd-afspilning.
+            </audio>
+            <div class="audio-footer">
+                <a href="/user/files/{{ f.id }}?download=1" class="btn btn-sm">&#11015; Download</a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if not pdf_files and not audio_files %}
+<div class="empty-state-large">
+    <div class="empty-icon">&#128196;</div>
+    <p>Der er ingen filer tilknyttet denne sang endnu.</p>
+</div>
+{% endif %}
+
+<div class="mt-2">
+    <a href="/user/dashboard" class="btn">&larr; Tilbage til mine sange</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchPdfTab(btn, panelId) {
+    const tabs = btn.closest('.pdf-tabs');
+    tabs.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-btn--active'));
+    tabs.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('tab-panel--active'));
+    btn.classList.add('tab-btn--active');
+    document.getElementById(panelId).classList.add('tab-panel--active');
+}
+</script>
+{% endblock %}

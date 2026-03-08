@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+
+{% block title %}Mine Sange - Noder{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Mine Sange</h1>
+    <p class="subtitle">{{ choir.name if choir else '' }}</p>
+</div>
+
+<!-- Highlighted songs -->
+{% if highlighted %}
+<div class="card highlight-card mb-2">
+    <h2>&#11088; I fokus lige nu</h2>
+    <div class="song-grid">
+        {% for song in highlighted %}
+        <a href="/user/songs/{{ song.id }}" class="song-card song-card--highlight">
+            <div class="song-card-icon">&#11088;</div>
+            <div class="song-card-body">
+                <h3>{{ song.title }}</h3>
+                {% if song.composer %}<p class="song-composer">{{ song.composer }}</p>{% endif %}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Setlists -->
+{% if setlists %}
+{% set non_empty_setlists = setlists | selectattr('items') | list %}
+{% if non_empty_setlists %}
+<div class="card mb-2">
+    <h2>&#127926; Setlister</h2>
+    <div class="song-grid">
+        {% for setlist in non_empty_setlists %}
+        <a href="/user/setlists/{{ setlist.id }}" class="song-card">
+            <div class="song-card-icon">&#127926;</div>
+            <div class="song-card-body">
+                <h3>{{ setlist.name }}</h3>
+                <p class="song-composer">{{ setlist.items | selectattr('song') | list | length }} sange</p>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+{% endif %}
+
+<!-- All songs -->
+<div class="card">
+    <h2>Alle sange</h2>
+
+    <div class="toolbar">
+        <form method="get" action="/user/dashboard" class="search-form">
+            <input type="text" name="q" value="{{ q }}" placeholder="Søg i sange..." class="search-input">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            <button type="submit" class="btn btn-primary">Søg</button>
+            {% if q %}<a href="/user/dashboard?sort={{ sort }}" class="btn">Nulstil</a>{% endif %}
+        </form>
+        <div class="sort-controls">
+            <span class="sort-label">Sortér:</span>
+            <a href="/user/dashboard?sort=title{% if q %}&q={{ q }}{% endif %}"
+               class="btn btn-sm {% if sort == 'title' %}btn-active{% endif %}">A-Z</a>
+            <a href="/user/dashboard?sort=date{% if q %}&q={{ q }}{% endif %}"
+               class="btn btn-sm {% if sort == 'date' %}btn-active{% endif %}">Dato</a>
+        </div>
+    </div>
+
+    {% if songs %}
+    <div class="song-grid">
+        {% for song, assigned_at in songs %}
+        <a href="/user/songs/{{ song.id }}" class="song-card">
+            <div class="song-card-icon">&#9836;</div>
+            <div class="song-card-body">
+                <h3>{{ song.title }}</h3>
+                {% if song.composer %}<p class="song-composer">{{ song.composer }}</p>{% endif %}
+                <p class="song-date">Tildelt {{ assigned_at.strftime('%d/%m/%Y') }}</p>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state-large">
+        <div class="empty-icon">&#9836;</div>
+        {% if q %}
+        <p>Ingen sange matcher din søgning.</p>
+        {% else %}
+        <p>Der er ingen sange tildelt dit kor endnu.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

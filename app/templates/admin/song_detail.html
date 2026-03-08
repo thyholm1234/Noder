@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% set active = "songs" %}
+
+{% block title %}{{ song.title }} - Noder{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb">
+        <a href="/admin/songs">Sange</a> &rsaquo; {{ song.title }}
+    </div>
+    <h1>{{ song.title }}</h1>
+    {% if song.composer %}<p class="subtitle">{{ song.composer }}</p>{% endif %}
+</div>
+
+<!-- Song info edit -->
+<div class="card">
+    <h2>Sanginformation</h2>
+    <form method="post" action="/admin/songs/{{ song.id }}/update">
+        <div class="form-row">
+            <div class="form-group">
+                <label>Titel</label>
+                <input type="text" name="title" value="{{ song.title }}" required>
+            </div>
+            <div class="form-group">
+                <label>Komponist</label>
+                <input type="text" name="composer" value="{{ song.composer or '' }}" placeholder="Valgfrit">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Tags <span class="field-hint">(kommasepareret, f.eks. jul, salme, 4-stemmig)</span></label>
+            <input type="text" name="tags" value="{{ song.tags or '' }}" placeholder="F.eks. jul, salme, klassisk">
+        </div>
+        <div class="form-group">
+            <label>Beskrivelse</label>
+            <textarea name="description" rows="4" placeholder="Evt. noter om sangen, historik, fremførelsesvejledning...">{{ song.description or '' }}</textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Gem ændringer</button>
+    </form>
+</div>
+
+<!-- Upload files -->
+<div class="card">
+    <h2>Upload filer</h2>
+    <form method="post" action="/admin/songs/{{ song.id }}/upload" enctype="multipart/form-data" class="upload-form">
+        <div class="form-row">
+            <div class="form-group">
+                <label>Filtype</label>
+                <select name="file_type" id="file_type_select" required onchange="updatePartNameLabel(this.value)">
+                    <option value="pdf">PDF (noder)</option>
+                    <option value="audio">Lydfil (stemme)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Fil</label>
+                <input type="file" name="file" id="upload_file_input" required accept=".pdf,.mp3,.wav,.ogg,.flac,.m4a,.aac,.wma,.aiff,.opus" onchange="suggestPartName(this)">
+            </div>
+            <div class="form-group">
+                <label id="part_name_label">Navn på fanen</label>
+                <input type="text" name="part_name" id="part_name_input" placeholder="F.eks. Sopran, Fuld partitur...">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Upload</button>
+    </form>
+</div>
+
+<!-- PDF files -->
+<div class="card mt-2">
+    <h2>Noder (PDF)</h2>
+    {% if pdf_files %}
+    <div class="pdf-tabs">
+        <div class="tab-bar" role="tablist">
+            {% for f in pdf_files %}
+            <button class="tab-btn{% if loop.first %} tab-btn--active{% endif %}"
+                    role="tab"
+                    onclick="switchPdfTab(this, 'admin-pdf-{{ f.id }}')">
+                {{ f.part_name or f.original_filename }}
+            </button>
+            {% endfor %}
+        </div>
+        {% for f in pdf_files %}
+        <div class="tab-panel{% if loop.first %} tab-panel--active{% endif %}" id="admin-pdf-{{ f.id }}">
+            <div class="pdf-viewer">
+                <iframe src="/admin/files/{{ f.id }}#toolbar=1&navpanes=0" type="application/pdf" loading="lazy"></iframe>
+            </div>
+            <div class="pdf-actions-bar">
+                <button class="btn btn-sm" onclick="togglePdfEdit('edit-{{ f.id }}')">&#9998; Rediger</button>
+                <a href="/admin/files/{{ f.id }}" target="_blank" class="btn btn-sm">Vis</a>
+                <a href="/admin/files/{{ f.id }}?download=1" class="btn btn-sm">Download</a>
+                <form method="post" action="/admin/files/{{ f.id }}/delete" class="inline"
+                      onsubmit="return confirm('Slet denne fil?')">
+                    <button type="submit" class="btn btn-sm btn-danger">Slet</button>
+                </form>
+            </div>
+            <div class="pdf-edit-form" id="edit-{{ f.id }}" style="display:none;">
+                <form method="post" action="/admin/files/{{ f.id }}/edit" enctype="multipart/form-data">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Navn (vises på fanen)</label>
+                            <input type="text" name="display_name" value="{{ f.part_name or '' }}" placeholder="F.eks. Sopran, Fuld partitur...">
+                        </div>
+                        <div class="form-group">
+                            <label>Erstat fil (valgfrit)</label>
+                            <input type="file" name="file" accept=".pdf">
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:0.5rem;">
+                        <button type="submit" class="btn btn-primary btn-sm">Gem ændringer</button>
+                        <button type="button" class="btn btn-sm" onclick="togglePdfEdit('edit-{{ f.id }}')">Annuller</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">Ingen PDF-filer uploadet.</p>
+    {% endif %}
+</div>
+
+<!-- Audio files -->
+<div class="card mt-2">
+    <h2>Stemmer (lyd)</h2>
+    {% if audio_files %}
+    <div class="file-list">
+        {% for f in audio_files %}
+        <div class="file-item audio-item">
+            <div class="file-info">
+                <span class="file-icon">&#127925;</span>
+                <span class="file-name">{{ f.part_name or f.original_filename }}</span>
+                <span class="file-original">({{ f.original_filename }})</span>
+            </div>
+            <div class="audio-player-wrapper">
+                <audio controls preload="metadata">
+                    <source src="/admin/files/{{ f.id }}" type="audio/mpeg">
+                </audio>
+            </div>
+            <div class="file-actions">
+                <a href="/admin/files/{{ f.id }}?download=1" class="btn btn-sm">Download</a>
+                <form method="post" action="/admin/files/{{ f.id }}/delete" class="inline"
+                      onsubmit="return confirm('Slet denne lydfil?')">
+                    <button type="submit" class="btn btn-sm btn-danger">Slet</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">Ingen lydfiler uploadet.</p>
+    {% endif %}
+</div>
+
+<!-- Assigned choirs -->
+<div class="card mt-2">
+    <h2>Tildelt til kor</h2>
+
+    {% if available_choirs %}
+    <form method="post" action="/admin/songs/{{ song.id }}/assign" class="mb-1">
+        <p class="field-hint mb-1">Vælg et eller flere kor og klik Tildel:</p>
+        <div class="choir-checkbox-list">
+            {% for choir in available_choirs %}
+            <label class="choir-checkbox-label">
+                <input type="checkbox" name="choir_id" value="{{ choir.id }}">
+                {{ choir.name }}
+            </label>
+            {% endfor %}
+        </div>
+        <button type="submit" class="btn btn-primary mt-1">Tildel valgte kor</button>
+    </form>
+    {% endif %}
+
+    {% if song.choir_songs %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Kor</th>
+                <th>Tildelt</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cs in song.choir_songs %}
+            <tr>
+                <td><a href="/admin/choirs/{{ cs.choir.id }}">{{ cs.choir.name }}</a></td>
+                <td>{{ cs.assigned_at.strftime('%d/%m/%Y') }}</td>
+                <td>
+                    <form method="post" action="/admin/songs/{{ song.id }}/unassign/{{ cs.choir.id }}" class="inline"
+                          onsubmit="return confirm('Fjern kor fra sang?')">
+                        <button type="submit" class="btn btn-sm btn-danger">Fjern</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">Sangen er ikke tildelt nogen kor endnu.</p>
+    {% endif %}
+</div>
+
+<!-- Links -->
+<div class="card mt-2">
+    <h2>Links</h2>
+    {% if song.links %}
+    <ul class="link-list mb-1">
+        {% for link in song.links %}
+        <li class="link-item">
+            <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" class="link-url">
+                &#128279; {{ link.label or link.url }}
+            </a>
+            <form method="post" action="/admin/songs/{{ song.id }}/links/{{ link.id }}/delete" class="inline"
+                  onsubmit="return confirm('Slet dette link?')">
+                <button type="submit" class="btn btn-sm btn-danger">Slet</button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-state mb-1">Ingen links tilføjet endnu.</p>
+    {% endif %}
+    <form method="post" action="/admin/songs/{{ song.id }}/links" class="inline-form">
+        <div class="form-group">
+            <input type="url" name="url" placeholder="https://..." required>
+        </div>
+        <div class="form-group">
+            <input type="text" name="label" placeholder="Beskrivelse (valgfrit)">
+        </div>
+        <button type="submit" class="btn btn-primary">Tilføj link</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchPdfTab(btn, panelId) {
+    const tabs = btn.closest('.pdf-tabs');
+    tabs.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-btn--active'));
+    tabs.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('tab-panel--active'));
+    btn.classList.add('tab-btn--active');
+    document.getElementById(panelId).classList.add('tab-panel--active');
+}
+
+function togglePdfEdit(editId) {
+    const el = document.getElementById(editId);
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function updatePartNameLabel(fileType) {
+    const label = document.getElementById('part_name_label');
+    const input = document.getElementById('part_name_input');
+    if (fileType === 'pdf') {
+        label.textContent = 'Navn på fanen';
+        input.placeholder = 'F.eks. Sopran, Fuld partitur...';
+    } else {
+        label.textContent = 'Stemmenavn';
+        input.placeholder = 'F.eks. Sopran, Alt, Tenor, Bas';
+    }
+}
+
+function suggestPartName(fileInput) {
+    const nameInput = document.getElementById('part_name_input');
+    if (!nameInput.value && fileInput.files.length > 0) {
+        // Strip extension and use filename as suggested name
+        const filename = fileInput.files[0].name.replace(/\.[^.]+$/, '');
+        nameInput.placeholder = filename;
+    }
+}
+</script>
+{% endblock %}

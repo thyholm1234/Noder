@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% set active = "choirs" %}
+
+{% block title %}{{ choir.name }} - Noder{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb">
+        <a href="/admin/choirs">Kor</a> &rsaquo; {{ choir.name }}
+    </div>
+    <h1>{{ choir.name }}</h1>
+    <p class="subtitle">Oprettet {{ choir.created_at.strftime('%d/%m/%Y') }}</p>
+    <div class="mt-1">
+        <a href="/admin/choirs/{{ choir.id }}/preview" class="btn btn-primary">&#128065; Vis medlemmernes dashboard</a>
+    </div>
+</div>
+
+<!-- Users section -->
+<div class="card">
+    <h2>Brugere i koret</h2>
+    <form method="post" action="/admin/choirs/{{ choir.id }}/add-user" class="inline-form mb-1">
+        <div class="form-group">
+            <input type="text" name="username" placeholder="Brugernavn" required>
+        </div>
+        <div class="form-group">
+            <input type="text" name="password" placeholder="Adgangskode" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Tilføj bruger</button>
+    </form>
+
+    {% if choir.users %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Brugernavn</th>
+                <th>Adgangskode</th>
+                <th>Oprettet</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in choir.users %}
+            <tr>
+                <td><strong>{{ user.username }}</strong></td>
+                <td><code class="password-display">{{ user.password }}</code></td>
+                <td>{{ user.created_at.strftime('%d/%m/%Y') }}</td>
+                <td>
+                    <form method="post" action="/admin/users/{{ user.id }}/delete" class="inline"
+                          onsubmit="return confirm('Slet bruger \'{{ user.username }}\'?')">
+                        <button type="submit" class="btn btn-sm btn-danger">Slet</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">Ingen brugere i dette kor endnu.</p>
+    {% endif %}
+</div>
+
+<!-- Assigned songs section -->
+<div class="card mt-2">
+    <h2>Tildelte sange</h2>
+
+    {% if available_songs %}
+    <form method="post" action="/admin/choirs/{{ choir.id }}/assign-song" class="inline-form mb-1">
+        <div class="form-group">
+            <select name="song_id" required>
+                <option value="">Vælg sang...</option>
+                {% for song in available_songs %}
+                <option value="{{ song.id }}">{{ song.title }}{% if song.composer %} — {{ song.composer }}{% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Tildel sang</button>
+    </form>
+    {% endif %}
+
+    {% if choir.choir_songs %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Sang</th>
+                <th>Highlight</th>
+                <th>Tildelt</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cs in choir.choir_songs %}
+            {% set is_hl = cs.highlight_start and cs.highlight_end and cs.highlight_start <= today and today <= cs.highlight_end %}
+            <tr>
+                <td>
+                    <a href="/admin/songs/{{ cs.song.id }}">{{ cs.song.title }}</a>
+                    {% if is_hl %}<span class="highlight-badge">&#11088; Highlight</span>{% endif %}
+                </td>
+                <td>
+                    <form method="post" action="/admin/choirs/{{ choir.id }}/highlight/{{ cs.song.id }}" class="highlight-form">
+                        <input type="date" name="highlight_start" value="{{ cs.highlight_start.isoformat() if cs.highlight_start else '' }}" title="Fra">
+                        <input type="date" name="highlight_end" value="{{ cs.highlight_end.isoformat() if cs.highlight_end else '' }}" title="Til">
+                        <button type="submit" class="btn btn-sm">Gem</button>
+                        {% if cs.highlight_start %}
+                        <button type="submit" name="highlight_start" value="" class="btn btn-sm" title="Fjern highlight">&times;</button>
+                        {% endif %}
+                    </form>
+                </td>
+                <td>{{ cs.assigned_at.strftime('%d/%m/%Y') }}</td>
+                <td>
+                    <form method="post" action="/admin/choirs/{{ choir.id }}/unassign-song/{{ cs.song.id }}" class="inline"
+                          onsubmit="return confirm('Fjern sang fra kor?')">
+                        <button type="submit" class="btn btn-sm btn-danger">Fjern</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">Ingen sange tildelt endnu. <a href="/admin/songs">Opret sange først</a>.</p>
+    {% endif %}
+</div>
+
+<!-- Setlists -->
+<div class="card mt-2">
+    <h2>Setlister</h2>
+
+    <form method="post" action="/admin/choirs/{{ choir.id }}/setlists" class="inline-form mb-1">
+        <div class="form-group">
+            <input type="text" name="name" placeholder="Navn på setliste..." required>
+        </div>
+        <button type="submit" class="btn btn-primary">Opret setliste</button>
+    </form>
+
+    {% if choir.setlists %}
+    {% for setlist in choir.setlists %}
+    <div class="setlist-card">
+        <div class="setlist-header">
+            <h3>&#127926; {{ setlist.name }}</h3>
+            <form method="post" action="/admin/choirs/{{ choir.id }}/setlists/{{ setlist.id }}/delete" class="inline"
+                  onsubmit="return confirm('Slet setliste \'{{ setlist.name }}\'?')">
+                <button type="submit" class="btn btn-sm btn-danger">Slet setliste</button>
+            </form>
+        </div>
+
+        <div class="setlist-add-controls">
+            {% if assigned_songs %}
+            <form method="post" action="/admin/choirs/{{ choir.id }}/setlists/{{ setlist.id }}/add" class="inline-form">
+                {% set items_song_ids = setlist.items | map(attribute='song_id') | list %}
+                <select name="song_id" required>
+                    <option value="">Tilføj sang...</option>
+                    {% for song in assigned_songs %}
+                    {% if song.id not in items_song_ids %}
+                    <option value="{{ song.id }}">{{ song.title }}</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-sm btn-primary">+ Sang</button>
+            </form>
+            {% endif %}
+            <form method="post" action="/admin/choirs/{{ choir.id }}/setlists/{{ setlist.id }}/add-placeholder" class="inline-form">
+                <input type="text" name="title" placeholder="Separator-tekst..." style="max-width:180px;">
+                <button type="submit" class="btn btn-sm">+ Separator</button>
+            </form>
+        </div>
+
+        {% if setlist.items %}
+        <div class="setlist-drag-list" id="setlist-items-{{ setlist.id }}" data-setlist-id="{{ setlist.id }}">
+            {% for item in setlist.items %}
+            <div class="setlist-item-card" data-item-id="{{ item.id }}">
+                <span class="drag-handle" title="Træk for at ændre rækkefølge">&#8942;</span>
+                {% if item.song %}
+                <span class="setlist-item-icon">&#9836;</span>
+                <span class="setlist-item-label">{{ item.song.title }}{% if item.song.composer %} <span class="setlist-item-composer">– {{ item.song.composer }}</span>{% endif %}</span>
+                <div class="setlist-item-actions">
+                    <a href="/admin/songs/{{ item.song.id }}" class="btn btn-sm">Vis</a>
+                    <form method="post" action="/admin/choirs/{{ choir.id }}/setlists/{{ setlist.id }}/remove-item/{{ item.id }}" class="inline">
+                        <button type="submit" class="btn btn-sm btn-danger">&times;</button>
+                    </form>
+                </div>
+                {% else %}
+                <span class="setlist-item-icon placeholder-icon">&#8212;</span>
+                <span class="setlist-item-label setlist-placeholder-label">{{ item.placeholder_text }}</span>
+                <div class="setlist-item-actions">
+                    <form method="post" action="/admin/choirs/{{ choir.id }}/setlists/{{ setlist.id }}/remove-item/{{ item.id }}" class="inline">
+                        <button type="submit" class="btn btn-sm btn-danger">&times;</button>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">Ingen sange i denne setliste endnu.</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="empty-state">Ingen setlister oprettet endnu.</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+<script>
+document.querySelectorAll('.setlist-drag-list').forEach(function(el) {
+    var setlistId = el.dataset.setlistId;
+    var choirId = '{{ choir.id }}';
+    new Sortable(el, {
+        animation: 150,
+        handle: '.drag-handle',
+        onEnd: function() {
+            var items = el.querySelectorAll('[data-item-id]');
+            var order = Array.from(items).map(function(i) { return i.dataset.itemId; });
+            fetch('/admin/choirs/' + choirId + '/setlists/' + setlistId + '/reorder', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({order: order})
+            });
+        }
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+
+{% block title %}{{ setlist.name }} - Noder{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb">
+        <a href="/user/dashboard">Mine Sange</a> &rsaquo; {{ setlist.name }}
+    </div>
+    <h1>&#127926; {{ setlist.name }}</h1>
+    <p class="subtitle">{{ setlist.items | length }} punkter</p>
+</div>
+
+<div class="card">
+    {% if setlist.items %}
+    <div class="setlist-ordered-list">
+        {% set song_counter = namespace(n=0) %}
+        {% for item in setlist.items %}
+        {% if item.song %}
+        {% set song_counter.n = song_counter.n + 1 %}
+        <a href="/user/songs/{{ item.song.id }}" class="setlist-song-row">
+            <span class="setlist-num">{{ song_counter.n }}</span>
+            <div class="setlist-song-info">
+                <h3>{{ item.song.title }}</h3>
+                {% if item.song.composer %}<p class="setlist-song-composer">{{ item.song.composer }}</p>{% endif %}
+            </div>
+            <span class="setlist-arrow">&#8250;</span>
+        </a>
+        {% else %}
+        <div class="setlist-placeholder-row">
+            <span class="setlist-placeholder-text">&#8212; {{ item.placeholder_text }} &#8212;</span>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state-large">
+        <div class="empty-icon">&#9836;</div>
+        <p>Ingen sange i denne setliste endnu.</p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="mt-2">
+    <a href="/user/dashboard" class="btn">&larr; Tilbage</a>
+</div>
+{% endblock %}

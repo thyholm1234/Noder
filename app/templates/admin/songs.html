@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% set active = "songs" %}
+
+{% block title %}Sange - Noder{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Sange</h1>
+    <p class="subtitle">Administrer sange med noderne og stemmerne</p>
+</div>
+
+<div class="card">
+    <h2>Opret ny sang</h2>
+    <form method="post" action="/admin/songs" class="inline-form">
+        <div class="form-group">
+            <input type="text" name="title" placeholder="Titel" required>
+        </div>
+        <div class="form-group">
+            <input type="text" name="composer" placeholder="Komponist (valgfrit)">
+        </div>
+        <button type="submit" class="btn btn-primary">Opret</button>
+    </form>
+</div>
+
+<div class="card mt-2">
+    <h2>Alle sange</h2>
+
+    <div class="toolbar mb-1">
+        <form method="get" action="/admin/songs" class="search-form">
+            <input type="text" name="q" value="{{ q }}" placeholder="Søg på titel, komponist eller tag..." class="search-input">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            <input type="hidden" name="order" value="{{ order }}">
+            <button type="submit" class="btn btn-primary">Søg</button>
+            {% if q %}<a href="/admin/songs?sort={{ sort }}&order={{ order }}" class="btn">Nulstil</a>{% endif %}
+        </form>
+        <div class="table-meta">{{ total }} sang{{ 'e' if total != 1 else '' }}</div>
+    </div>
+
+    {% macro sort_url(col) %}/admin/songs?sort={{ col }}&order={{ 'asc' if (sort == col and order == 'desc') else 'desc' if sort == col else 'asc' }}&q={{ q }}&page=1{% endmacro %}
+    {% macro sort_icon(col) %}{% if sort == col %}{{ '▲' if order == 'asc' else '▼' }}{% else %}<span class="sort-icon-idle">⇅</span>{% endif %}{% endmacro %}
+
+    {% if songs or q %}
+    <table class="table table-sortable">
+        <thead>
+            <tr>
+                <th><a href="{{ sort_url('title') }}" class="sort-link{% if sort == 'title' %} sort-active{% endif %}">Titel {{ sort_icon('title') }}</a></th>
+                <th><a href="{{ sort_url('composer') }}" class="sort-link{% if sort == 'composer' %} sort-active{% endif %}">Komponist {{ sort_icon('composer') }}</a></th>
+                <th><a href="{{ sort_url('tags') }}" class="sort-link{% if sort == 'tags' %} sort-active{% endif %}">Tags {{ sort_icon('tags') }}</a></th>
+                <th>Filer</th>
+                <th>Tildelt kor</th>
+                <th><a href="{{ sort_url('created') }}" class="sort-link{% if sort == 'created' %} sort-active{% endif %}">Oprettet {{ sort_icon('created') }}</a></th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for song in songs %}
+            <tr>
+                <td><a href="/admin/songs/{{ song.id }}">{{ song.title }}</a></td>
+                <td>{{ song.composer or '—' }}</td>
+                <td>
+                    {% if song.tags %}
+                    {% for tag in song.tags.split(',') %}
+                    <span class="tag-badge">{{ tag.strip() }}</span>
+                    {% endfor %}
+                    {% else %}—{% endif %}
+                </td>
+                <td>
+                    {% set pdf_count = song.files | selectattr('file_type', 'eq', 'pdf') | list | length %}
+                    {% set audio_count = song.files | selectattr('file_type', 'eq', 'audio') | list | length %}
+                    {{ pdf_count }} PDF, {{ audio_count }} lyd
+                </td>
+                <td>{{ song.choir_songs | length }} kor</td>
+                <td>{{ song.created_at.strftime('%d/%m/%Y') }}</td>
+                <td class="actions">
+                    <a href="/admin/songs/{{ song.id }}" class="btn btn-sm">Rediger</a>
+                    <form method="post" action="/admin/songs/{{ song.id }}/delete" class="inline"
+                          onsubmit="return confirm('Slet sang &quot;{{ song.title }}&quot;? Alle filer slettes også.')">
+                        <button type="submit" class="btn btn-sm btn-danger">Slet</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}
+        <a href="/admin/songs?sort={{ sort }}&order={{ order }}&q={{ q }}&page={{ page - 1 }}" class="btn btn-sm">&lsaquo; Forrige</a>
+        {% else %}
+        <span class="btn btn-sm btn-disabled">&lsaquo; Forrige</span>
+        {% endif %}
+
+        {% for p in range(1, total_pages + 1) %}
+            {% if p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
+                {% if not loop.first and p > 1 and p != page - 2 and p != 2 and loop.previtem is defined and loop.previtem + 1 != p %}
+                <span class="pagination-ellipsis">&hellip;</span>
+                {% endif %}
+                <a href="/admin/songs?sort={{ sort }}&order={{ order }}&q={{ q }}&page={{ p }}"
+                   class="btn btn-sm{% if p == page %} btn-active{% endif %}">{{ p }}</a>
+            {% endif %}
+        {% endfor %}
+
+        {% if page < total_pages %}
+        <a href="/admin/songs?sort={{ sort }}&order={{ order }}&q={{ q }}&page={{ page + 1 }}" class="btn btn-sm">Næste &rsaquo;</a>
+        {% else %}
+        <span class="btn btn-sm btn-disabled">Næste &rsaquo;</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <p class="empty-state">Ingen sange oprettet endnu.</p>
+    {% endif %}
+</div>
+{% endblock %}

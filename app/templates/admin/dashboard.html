@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+
+{% block title %}Admin Dashboard - Noder{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <p class="subtitle">Overblik over Noder-systemet</p>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-number">{{ choir_count }}</div>
+        <div class="stat-label">Kor</div>
+        <a href="/admin/choirs" class="stat-link">Administrer &rarr;</a>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ user_count }}</div>
+        <div class="stat-label">Brugere</div>
+        <a href="/admin/choirs" class="stat-link">Se brugere &rarr;</a>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ song_count }}</div>
+        <div class="stat-label">Sange</div>
+        <a href="/admin/songs" class="stat-link">Administrer &rarr;</a>
+    </div>
+</div>
+
+{% if recent_songs %}
+<div class="card mt-2">
+    <h2>Seneste sange</h2>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Titel</th>
+                <th>Komponist</th>
+                <th>Oprettet</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for song in recent_songs %}
+            <tr>
+                <td>{{ song.title }}</td>
+                <td>{{ song.composer or '—' }}</td>
+                <td>{{ song.created_at.strftime('%d/%m/%Y') }}</td>
+                <td><a href="/admin/songs/{{ song.id }}" class="btn btn-sm">Vis</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="quick-actions mt-2">
+    <h2>Hurtige handlinger</h2>
+    <div class="action-grid">
+        <a href="/admin/choirs" class="action-card">
+            <span class="action-icon">&#9834;</span>
+            <span>Opret nyt kor</span>
+        </a>
+        <a href="/admin/songs" class="action-card">
+            <span class="action-icon">&#9836;</span>
+            <span>Tilføj ny sang</span>
+        </a>
+    </div>
+</div>
+{% endblock %}

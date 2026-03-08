@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% set active = "choirs" %}
+
+{% block title %}{{ choir.name }} – Dashboard preview{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="breadcrumb">
+        <a href="/admin/choirs">Kor</a> &rsaquo; <a href="/admin/choirs/{{ choir.id }}">{{ choir.name }}</a> &rsaquo; Dashboard preview
+    </div>
+    <h1>{{ choir.name }} — Medlemmernes visning</h1>
+    <p class="subtitle">Forhåndsvisning af hvad kormedlemmer ser</p>
+</div>
+
+<!-- Highlighted songs -->
+{% if highlighted %}
+<div class="card highlight-card">
+    <h2>&#11088; I fokus lige nu</h2>
+    <div class="song-grid">
+        {% for song in highlighted %}
+        <a href="/admin/songs/{{ song.id }}" class="song-card song-card--highlight">
+            <div class="song-card-icon">&#11088;</div>
+            <div class="song-card-body">
+                <h3>{{ song.title }}</h3>
+                {% if song.composer %}<p class="song-composer">{{ song.composer }}</p>{% endif %}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Setlists -->
+{% if setlists %}
+{% set non_empty_setlists = setlists | selectattr('items') | list %}
+{% if non_empty_setlists %}
+<div class="card mt-2">
+    <h2>&#127926; Setlister</h2>
+    <div class="song-grid">
+        {% for setlist in non_empty_setlists %}
+        <div class="song-card" style="cursor:default;">
+            <div class="song-card-icon">&#127926;</div>
+            <div class="song-card-body">
+                <h3>{{ setlist.name }}</h3>
+                <p class="song-composer">{{ setlist.items | selectattr('song') | list | length }} sange</p>
+                <ul style="margin-top:.5rem; padding-left:1rem; font-size:.85rem; color:var(--text-light);">
+                    {% for item in setlist.items %}
+                    {% if item.song %}<li>{{ item.song.title }}</li>
+                    {% else %}<li style="list-style:none; font-style:italic;">— {{ item.placeholder_text }} —</li>{% endif %}
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+{% endif %}
+
+<!-- All songs -->
+<div class="card mt-2">
+    <h2>Alle sange</h2>
+    {% if songs %}
+    <div class="song-grid">
+        {% for song, assigned_at in songs %}
+        <a href="/admin/songs/{{ song.id }}" class="song-card">
+            <div class="song-card-icon">&#9836;</div>
+            <div class="song-card-body">
+                <h3>{{ song.title }}</h3>
+                {% if song.composer %}<p class="song-composer">{{ song.composer }}</p>{% endif %}
+                <p class="song-date">Tildelt {{ assigned_at.strftime('%d/%m/%Y') }}</p>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state-large">
+        <div class="empty-icon">&#9836;</div>
+        <p>Ingen sange tildelt endnu.</p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="mt-2">
+    <a href="/admin/choirs/{{ choir.id }}" class="btn">&larr; Tilbage til koradministration</a>
+</div>
+{% endblock %}
