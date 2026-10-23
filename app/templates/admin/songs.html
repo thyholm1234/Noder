@@ -27,7 +27,8 @@
     <div class="toolbar">
         <form method="get" action="/admin/songs" class="search-bar">
             {{ icon('search', 18) }}
-            <input type="search" name="q" value="{{ q }}" placeholder="Søg på titel, komponist eller tag…  (tast /)" data-search-shortcut autocomplete="off">
+            <input type="search" name="q" value="{{ q }}" placeholder="Søg på titel, komponist eller tag…" data-search-shortcut autocomplete="off">
+            <kbd class="kbd-hint" title="Tast / for at søge">/</kbd>
             <input type="hidden" name="sort" value="{{ sort }}">
             <input type="hidden" name="order" value="{{ order }}">
             {% if q %}<a href="/admin/songs?sort={{ sort }}&order={{ order }}" class="btn btn-sm btn-ghost">{{ icon('x', 14) }} Nulstil</a>{% endif %}
@@ -40,7 +41,7 @@
 
     {% if songs %}
     <div class="table-wrap">
-    <table class="table table-sortable">
+    <table class="table table-sortable table--stack">
         <thead>
             <tr>
                 <th><a href="{{ sort_url('title') }}" class="sort-link{% if sort == 'title' %} sort-active{% endif %}">Titel {{ sort_icon('title') }}</a></th>
@@ -58,20 +59,20 @@
             {% set audio_count = song.files | selectattr('file_type', 'eq', 'audio') | list | length %}
             <tr>
                 <td><a href="/admin/songs/{{ song.id }}" class="strong-link">{{ song.title }}</a></td>
-                <td class="muted">{{ song.composer or '—' }}</td>
-                <td>
+                <td class="muted" data-label="Komponist">{{ song.composer or '—' }}</td>
+                <td data-label="Tags">
                     {% if song.tags %}
                     {% for tag in song.tags.split(',') if tag.strip() %}
                     <a href="/admin/songs?q={{ tag.strip() | urlencode }}" class="tag-badge">{{ tag.strip() }}</a>
                     {% endfor %}
                     {% else %}<span class="muted">—</span>{% endif %}
                 </td>
-                <td class="nowrap">
+                <td class="nowrap" data-label="Filer">
                     <span class="chip{% if not pdf_count %} chip--empty{% endif %}" title="PDF">{{ icon('file', 12) }} {{ pdf_count }}</span>
                     <span class="chip{% if not audio_count %} chip--empty{% endif %}" title="Lyd">{{ icon('headphones', 12) }} {{ audio_count }}</span>
                 </td>
-                <td class="muted">{{ song.choir_songs | length }}</td>
-                <td class="muted nowrap">{{ song.created_at.strftime('%d/%m/%Y') }}</td>
+                <td class="muted" data-label="Kor">{{ song.choir_songs | length }}</td>
+                <td class="muted nowrap" data-label="Oprettet">{{ song.created_at.strftime('%d/%m/%Y') }}</td>
                 <td class="actions">
                     <a href="/admin/songs/{{ song.id }}" class="btn btn-sm btn-ghost" title="Redigér">{{ icon('edit', 14) }}</a>
                     <form method="post" action="/admin/songs/{{ song.id }}/delete" class="inline"

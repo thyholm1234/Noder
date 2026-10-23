@@ -29,13 +29,24 @@
     {% endif %}
     {% for f in pdf_files %}
     <div class="tab-panel{% if loop.first %} tab-panel--active{% endif %}" id="pdf-{{ f.id }}" role="tabpanel">
+        {# Phones/tablets can't show PDFs in an iframe reliably — offer the native viewer instead #}
+        <a href="{{ base }}{{ f.id }}" target="_blank" rel="noopener" class="pdf-open-card">
+            <span class="pdf-open-icon">{{ icon('file', 26) }}</span>
+            <span class="pdf-open-text">
+                <strong>Åbn noder</strong>
+                <small>{{ f.part_name or f.original_filename }} · åbner i fuld skærm</small>
+            </span>
+            {{ icon('external', 18) }}
+        </a>
         <div class="pdf-viewer" id="viewer-{{ f.id }}">
-            <iframe {% if loop.first %}src{% else %}data-src{% endif %}="{{ base }}{{ f.id }}#toolbar=1&navpanes=0&view=FitH"
+            {# src is set by app.js only on large screens, so phones don't download the PDF twice #}
+            <iframe data-src="{{ base }}{{ f.id }}#toolbar=1&navpanes=0&view=FitH"
                     title="{{ f.part_name or f.original_filename }}"></iframe>
+            <noscript><p class="empty-state">Slå JavaScript til for at se noderne her — eller brug “Ny fane”.</p></noscript>
         </div>
         <div class="pdf-actions-bar">
-            <button type="button" class="btn btn-sm" data-fullscreen="#viewer-{{ f.id }}">{{ icon('maximize', 15) }} Fuld skærm</button>
-            <a href="{{ base }}{{ f.id }}" target="_blank" rel="noopener" class="btn btn-sm">{{ icon('external', 15) }} Ny fane</a>
+            <button type="button" class="btn btn-sm pdf-fullscreen-btn" data-fullscreen="#viewer-{{ f.id }}">{{ icon('maximize', 15) }} Fuld skærm</button>
+            <a href="{{ base }}{{ f.id }}" target="_blank" rel="noopener" class="btn btn-sm pdf-newtab-btn">{{ icon('external', 15) }} Ny fane</a>
             <a href="{{ base }}{{ f.id }}?download=1" class="btn btn-sm">{{ icon('download', 15) }} Download</a>
             {{ caller(f) if caller else '' }}
         </div>

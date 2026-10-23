@@ -54,7 +54,7 @@
 
     {% if users %}
     <div class="table-wrap">
-    <table class="table">
+    <table class="table table--stack">
         <thead>
             <tr><th>Brugernavn</th><th>Sidst logget ind</th><th>Oprettet</th><th></th></tr>
         </thead>
@@ -68,8 +68,8 @@
                         <button type="submit" class="btn btn-sm btn-primary">Gem</button>
                     </form>
                 </td>
-                <td class="muted">{{ user.last_login.strftime('%d/%m/%Y %H:%M') if user.last_login else 'Aldrig' }}</td>
-                <td class="muted">{{ user.created_at.strftime('%d/%m/%Y') }}</td>
+                <td class="muted" data-label="Sidst logget ind">{{ user.last_login.strftime('%d/%m/%Y %H:%M') if user.last_login else 'Aldrig' }}</td>
+                <td class="muted" data-label="Oprettet">{{ user.created_at.strftime('%d/%m/%Y') }}</td>
                 <td class="actions">
                     <button type="button" class="btn btn-sm btn-ghost" data-toggle="#rename-user-{{ user.id }}" title="Omdøb">{{ icon('edit', 14) }}</button>
                     <form method="post" action="/admin/users/{{ user.id }}/reset-password" class="inline"
@@ -122,7 +122,7 @@
 
     {% if choir_songs %}
     <div class="table-wrap">
-    <table class="table">
+    <table class="table table--stack">
         <thead>
             <tr><th>Sang</th><th>I fokus <span class="field-hint">(vises øverst for medlemmer)</span></th><th>Tildelt</th><th></th></tr>
         </thead>
@@ -134,7 +134,7 @@
                     <a href="/admin/songs/{{ cs.song.id }}">{{ cs.song.title }}</a>
                     {% if is_hl %}<span class="pill pill--warn">{{ icon('star', 12) }} I fokus</span>{% endif %}
                 </td>
-                <td>
+                <td data-label="I fokus">
                     <form method="post" action="/admin/choirs/{{ choir.id }}/highlight/{{ cs.song.id }}" class="highlight-form">
                         <input type="date" name="highlight_start" value="{{ cs.highlight_start.isoformat() if cs.highlight_start else '' }}" aria-label="Fra">
                         <span class="muted">–</span>
@@ -145,7 +145,7 @@
                         {% endif %}
                     </form>
                 </td>
-                <td class="muted">{{ cs.assigned_at.strftime('%d/%m/%Y') }}</td>
+                <td class="muted" data-label="Tildelt">{{ cs.assigned_at.strftime('%d/%m/%Y') }}</td>
                 <td class="actions">
                     <form method="post" action="/admin/choirs/{{ choir.id }}/unassign-song/{{ cs.song.id }}" class="inline"
                           data-confirm="Fjern “{{ cs.song.title }}” fra koret? Den forsvinder også fra korets setlister." data-confirm-ok="Fjern">
@@ -291,5 +291,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/vendor/Sortable.min.js"></script>
+<script src="{{ asset('vendor/Sortable.min.js') }}"></script>
 {% endblock %}

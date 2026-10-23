@@ -14,7 +14,7 @@ from app.models import User
 from app.auth import (verify_admin, verify_password, verify_csrf, login_blocked,
                       register_failure, clear_failures)
 from app.routers import admin, user
-from app.templating import render
+from app.templating import render, templates, asset, ASSET_VERSION, PRECACHE
 
 
 @asynccontextmanager
@@ -86,6 +86,56 @@ async def root(request: Request):
 @app.get("/healthz")
 async def healthz():
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# PWA: manifest, service worker (served from / so its scope is the whole app), offline page
+# ---------------------------------------------------------------------------
+@app.get("/manifest.webmanifest")
+async def manifest():
+    icon = lambda src, size, purpose="any": {"src": src, "sizes": size, "type": "image/png", "purpose": purpose}  # noqa: E731
+    return JSONResponse(
+        {
+            "id": "/",
+            "name": "Noder",
+            "short_name": "Noder",
+            "description": "Noder og stemmer til dit kor",
+            "lang": "da",
+            "start_url": "/?source=pwa",
+            "scope": "/",
+            "display": "standalone",
+            "display_override": ["standalone", "minimal-ui"],
+            "orientation": "any",
+            "background_color": "#151a2d",
+            "theme_color": "#151a2d",
+            "categories": ["music", "education"],
+            "icons": [
+                icon(asset("icons/icon-192.png"), "192x192"),
+                icon(asset("icons/icon-512.png"), "512x512"),
+                icon(asset("icons/maskable-512.png"), "512x512", "maskable"),
+            ],
+            "shortcuts": [
+                {"name": "Mine sange", "url": "/user/dashboard",
+                 "icons": [icon(asset("icons/icon-192.png"), "192x192")]},
+            ],
+        },
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.get("/sw.js")
+async def service_worker(request: Request):
+    return templates.TemplateResponse(
+        request, "sw.js", {"version": ASSET_VERSION, "precache": PRECACHE},
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+    )
+
+
+@app.get("/offline", response_class=HTMLResponse)
+async def offline(request: Request):
+    return render(request, "offline.html")
 
 
 @app.get("/login", response_class=HTMLResponse)

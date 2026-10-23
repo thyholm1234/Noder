@@ -221,15 +221,22 @@
     // ------------------------------------------------------------------
     // Tabs (lazy-loads PDF iframes on first view)
     // ------------------------------------------------------------------
+    const INLINE_PDF = '(pointer: fine) and (min-width: 769px)';
+    function loadVisiblePdfs() {
+        if (!window.matchMedia(INLINE_PDF).matches) return;
+        $$('.tab-panel--active iframe[data-src]').forEach((frame) => {
+            frame.src = frame.dataset.src;
+            frame.removeAttribute('data-src');
+        });
+    }
     function activateTab(btn) {
         const tabs = btn.closest('[data-tabs]');
         $$('.tab-btn', tabs).forEach((b) => b.classList.toggle('tab-btn--active', b === btn));
         $$('.tab-panel', tabs).forEach((p) => {
             const on = p.id === btn.dataset.tab;
             p.classList.toggle('tab-panel--active', on);
-            const frame = on && p.querySelector('iframe[data-src]');
-            if (frame) { frame.src = frame.dataset.src; frame.removeAttribute('data-src'); }
         });
+        loadVisiblePdfs();
     }
     document.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-tabs] .tab-btn');
@@ -421,6 +428,56 @@
                 .catch(() => { el.textContent = original; toast('Kunne ikke gemme', 'error'); });
         });
     });
+
+    // ------------------------------------------------------------------
+    // PDF preview: only load iframes where they can actually render
+    // ------------------------------------------------------------------
+    loadVisiblePdfs();
+    window.matchMedia(INLINE_PDF).addEventListener?.('change', loadVisiblePdfs);
+
+    // ------------------------------------------------------------------
+    // Mobile "Mere" sheet
+    // ------------------------------------------------------------------
+    const sidebar = $('#sidebar');
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') sidebar?.classList.remove('sidebar--open'); });
+    $$('.sidebar-footer a').forEach((a) => a.addEventListener('click', () => sidebar.classList.remove('sidebar--open')));
+
+    // ------------------------------------------------------------------
+    // PWA: service worker + install button
+    // ------------------------------------------------------------------
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+        window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {}));
+    }
+
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    const installBtns = $$('[data-install]');
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    let deferredPrompt = null;
+    const showInstall = (on) => installBtns.forEach((b) => { b.hidden = !on || standalone; });
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        showInstall(true);
+    });
+    window.addEventListener('appinstalled', () => {
+        deferredPrompt = null;
+        showInstall(false);
+        toast('Noder er installeret — find den på din hjemmeskærm');
+    });
+    // iOS has no install prompt: explain the Share → "Føj til hjemmeskærm" route instead
+    if (isIOS && !standalone) showInstall(true);
+
+    installBtns.forEach((btn) => btn.addEventListener('click', async () => {
+        if (deferredPrompt) {
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            deferredPrompt = null;
+            if (outcome === 'accepted') showInstall(false);
+        } else if (isIOS) {
+            toast('Tryk på Del-ikonet (firkant med pil) i Safari og vælg “Føj til hjemmeskærm”.', 'secret');
+        }
+    }));
 
     // Export dialog: toast while the server builds the PDF
     $$('[data-export-form]').forEach((form) => form.addEventListener('submit', (e) => {

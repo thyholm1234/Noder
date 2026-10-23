@@ -3,11 +3,10 @@
 <html lang="da">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#151a2d">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    {% include "_pwa_head.html" %}
     <title>Log ind - Noder</title>
-    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/static/style.css?v=2">
+    <link rel="stylesheet" href="{{ asset('style.css') }}">
     <script>try { var t = localStorage.getItem('noder.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
 </head>
 <body class="login-body">
@@ -44,6 +43,6 @@
             </form>
         </div>
     </div>
-    <script src="/static/app.js?v=2"></script>
+    <script src="{{ asset('app.js') }}"></script>
 </body>
 </html>

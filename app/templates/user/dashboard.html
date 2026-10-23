@@ -55,8 +55,9 @@
 
     <form method="get" action="/user/dashboard" class="search-bar">
         {{ icon('search', 18) }}
-        <input type="search" name="q" value="{{ q }}" placeholder="Søg i titel, komponist eller tag…  (tast /)"
+        <input type="search" name="q" value="{{ q }}" placeholder="Søg i titel, komponist eller tag…"
                data-filter=".song-grid--all > .song-card" data-search-shortcut autocomplete="off">
+        <kbd class="kbd-hint" title="Tast / for at søge">/</kbd>
         <input type="hidden" name="sort" value="{{ sort }}">
     </form>
 

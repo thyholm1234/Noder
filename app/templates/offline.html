@@ -1,0 +1,25 @@
+{% from "_icons.html" import icon %}
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#151a2d">
+    <title>Offline - Noder</title>
+    <link rel="icon" href="{{ asset('favicon.svg') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ asset('style.css') }}">
+</head>
+<body class="login-body">
+    <div class="login-container">
+        <div class="login-card offline-card">
+            <div class="login-header">
+                <div class="login-mark">{{ icon('music', 28) }}</div>
+                <h1>Du er offline</h1>
+                <p>Noder kræver internetforbindelse. Tjek dit netværk og prøv igen.</p>
+            </div>
+            <button type="button" class="btn btn-primary btn-block btn-lg" onclick="location.reload()">Prøv igen</button>
+        </div>
+    </div>
+    <script>window.addEventListener('online', () => location.reload());</script>
+</body>
+</html>
