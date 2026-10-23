@@ -1,57 +1,42 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% set active = "choirs" %}
 
 {% block title %}Kor - Noder{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h1>Kor</h1>
-    <p class="subtitle">Administrer kor og deres medlemmer</p>
-</div>
-
-<div class="card">
-    <h2>Opret nyt kor</h2>
+<div class="page-header page-header--split">
+    <div>
+        <p class="eyebrow">Administration</p>
+        <h1>Kor</h1>
+    </div>
     <form method="post" action="/admin/choirs" class="inline-form">
-        <div class="form-group">
-            <input type="text" name="name" placeholder="Kornavn" required>
-        </div>
-        <button type="submit" class="btn btn-primary">Opret</button>
+        <input type="text" name="name" placeholder="Navn på nyt kor" required maxlength="255">
+        <button type="submit" class="btn btn-primary">{{ icon('plus', 16) }} Opret kor</button>
     </form>
 </div>
 
-<div class="card mt-2">
-    <h2>Alle kor</h2>
-    {% if choirs %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Navn</th>
-                <th>Brugere</th>
-                <th>Sange</th>
-                <th>Oprettet</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for choir in choirs %}
-            <tr>
-                <td><a href="/admin/choirs/{{ choir.id }}">{{ choir.name }}</a></td>
-                <td>{{ choir.users | length }}</td>
-                <td>{{ choir.choir_songs | length }}</td>
-                <td>{{ choir.created_at.strftime('%d/%m/%Y') }}</td>
-                <td class="actions">
-                    <a href="/admin/choirs/{{ choir.id }}" class="btn btn-sm">Rediger</a>
-                    <form method="post" action="/admin/choirs/{{ choir.id }}/delete" class="inline"
-                          onsubmit="return confirm('Slet kor \'{{ choir.name }}\'? Alle brugere i koret slettes også.')">
-                        <button type="submit" class="btn btn-sm btn-danger">Slet</button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="empty-state">Ingen kor oprettet endnu.</p>
-    {% endif %}
+{% if choirs %}
+<div class="choir-grid">
+    {% for choir in choirs %}
+    <a href="/admin/choirs/{{ choir.id }}" class="choir-tile">
+        <div class="choir-avatar">{{ choir.name[:1] | upper }}</div>
+        <div class="choir-tile-body">
+            <h3>{{ choir.name }}</h3>
+            <div class="choir-stats">
+                <span>{{ icon('user', 13) }} {{ choir.users | length }}</span>
+                <span>{{ icon('music', 13) }} {{ choir.choir_songs | length }}</span>
+                <span>{{ icon('list', 13) }} {{ choir.setlists | length }}</span>
+            </div>
+        </div>
+        {{ icon('chevron-right', 18) }}
+    </a>
+    {% endfor %}
 </div>
+{% else %}
+<div class="empty-state-large card">
+    <div class="empty-icon">{{ icon('users', 48) }}</div>
+    <p>Ingen kor oprettet endnu — opret det første ovenfor.</p>
+</div>
+{% endif %}
 {% endblock %}

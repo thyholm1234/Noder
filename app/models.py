@@ -20,9 +20,10 @@ class User(Base):
 
     id = Column(Integer, primary_key=True)
     username = Column(String(255), nullable=False, unique=True)
-    password = Column(String(255), nullable=False)
+    password = Column(String(255), nullable=False)  # scrypt hash, see app.auth
     choir_id = Column(Integer, ForeignKey("choirs.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_login = Column(DateTime(timezone=True), nullable=True)
 
     choir = relationship("Choir", back_populates="users")
 
@@ -78,6 +79,8 @@ class Setlist(Base):
     id = Column(Integer, primary_key=True)
     choir_id = Column(Integer, ForeignKey("choirs.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(255), nullable=False)
+    event_date = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     choir = relationship("Choir", back_populates="setlists")

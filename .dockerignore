@@ -5,3 +5,9 @@ __pycache__
 .gitignore
 .env.example
 *.md
+.env
+.env.*
+!.env.template
+uploads
+venv
+.venv

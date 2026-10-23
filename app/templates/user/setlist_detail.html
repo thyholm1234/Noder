@@ -1,48 +1,115 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_export_dialog.html" import export_button, export_dialog %}
 {% set active = "dashboard" %}
 
 {% block title %}{{ setlist.name }} - Noder{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <div class="breadcrumb">
-        <a href="/user/dashboard">Mine Sange</a> &rsaquo; {{ setlist.name }}
-    </div>
-    <h1>&#127926; {{ setlist.name }}</h1>
-    <p class="subtitle">{{ setlist.items | length }} punkter</p>
-</div>
-
-<div class="card">
-    {% if setlist.items %}
-    <div class="setlist-ordered-list">
-        {% set song_counter = namespace(n=0) %}
-        {% for item in setlist.items %}
-        {% if item.song %}
-        {% set song_counter.n = song_counter.n + 1 %}
-        <a href="/user/songs/{{ item.song.id }}" class="setlist-song-row">
-            <span class="setlist-num">{{ song_counter.n }}</span>
-            <div class="setlist-song-info">
-                <h3>{{ item.song.title }}</h3>
-                {% if item.song.composer %}<p class="setlist-song-composer">{{ item.song.composer }}</p>{% endif %}
-            </div>
-            <span class="setlist-arrow">&#8250;</span>
-        </a>
-        {% else %}
-        <div class="setlist-placeholder-row">
-            <span class="setlist-placeholder-text">&#8212; {{ item.placeholder_text }} &#8212;</span>
+{% set n_songs = setlist.items | selectattr('song') | list | length %}
+<div class="page-header page-header--split">
+    <div>
+        <div class="breadcrumb">
+            <a href="/user/dashboard">Mine sange</a> {{ icon('chevron-right', 14) }} <span>{{ setlist.name }}</span>
         </div>
-        {% endif %}
-        {% endfor %}
+        <h1>{{ setlist.name }}</h1>
+        <p class="subtitle">
+            {% if setlist.event_date %}{{ icon('calendar', 15) }} {{ setlist.event_date | danish_date }} · {% endif %}
+            {{ n_songs }} sang{{ 'e' if n_songs != 1 else '' }}
+        </p>
     </div>
-    {% else %}
-    <div class="empty-state-large">
-        <div class="empty-icon">&#9836;</div>
-        <p>Ingen sange i denne setliste endnu.</p>
+    {% if n_songs %}
+    <div class="header-actions">
+        {{ export_button("export-dialog") }}
     </div>
     {% endif %}
 </div>
 
-<div class="mt-2">
-    <a href="/user/dashboard" class="btn">&larr; Tilbage</a>
-</div>
+{% if setlist.notes %}
+<div class="callout">{{ icon('sparkles', 16) }} <div class="song-description">{{ setlist.notes }}</div></div>
+{% endif %}
+
+{% if playlist | selectattr('tracks') | list %}
+<section class="card player-card" id="rehearsal" data-playlist='{{ playlist | tojson }}'>
+    <div class="card-head">
+        <h2>{{ icon('headphones') }} Øv hele setlisten</h2>
+        <label class="voice-inline">
+            Stemme
+            <select data-player-voice data-voice-picker>
+                {% for p in audio_parts %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                <option value="">Første lydfil</option>
+            </select>
+        </label>
+    </div>
+    <div class="player">
+        <div class="player-now">
+            <div class="player-index" data-player-index>–</div>
+            <div class="player-meta">
+                <div class="player-title" data-player-title>Tryk afspil for at starte</div>
+                <div class="player-sub" data-player-sub>&nbsp;</div>
+            </div>
+        </div>
+        <div class="player-progress">
+            <span data-player-time>0:00</span>
+            <input type="range" min="0" max="1000" value="0" data-player-seek aria-label="Position">
+            <span data-player-duration>0:00</span>
+        </div>
+        <div class="player-controls">
+            <select data-player-rate aria-label="Tempo" title="Tempo">
+                <option value="0.6">60%</option><option value="0.75">75%</option><option value="0.9">90%</option>
+                <option value="1" selected>100%</option><option value="1.1">110%</option>
+            </select>
+            <button type="button" class="btn btn-ghost btn-icon" data-player-prev title="Forrige sang">{{ icon('prev', 20) }}</button>
+            <button type="button" class="btn btn-primary btn-round" data-player-toggle title="Afspil / pause">
+                <span class="when-paused">{{ icon('play', 22) }}</span><span class="when-playing">{{ icon('pause', 22) }}</span>
+            </button>
+            <button type="button" class="btn btn-ghost btn-icon" data-player-next title="Næste sang">{{ icon('next', 20) }}</button>
+            <button type="button" class="btn btn-ghost btn-icon" data-player-loop title="Gentag sang">{{ icon('repeat', 18) }}</button>
+        </div>
+        <audio preload="none" data-player-audio></audio>
+    </div>
+</section>
+{% endif %}
+
+<section class="card">
+    {% if setlist.items %}
+    <ol class="setlist-ordered-list">
+        {% set counter = namespace(n=0) %}
+        {% for item in setlist.items %}
+        {% if item.song %}
+        {% set counter.n = counter.n + 1 %}
+        {% set n_pdf = item.song.files | selectattr('file_type', 'eq', 'pdf') | list | length %}
+        {% set n_audio = item.song.files | selectattr('file_type', 'eq', 'audio') | list | length %}
+        <li>
+            <a href="/user/songs/{{ item.song.id }}?sl={{ setlist.id }}" class="setlist-song-row" data-song-row="{{ item.song.id }}">
+                <span class="setlist-num">{{ counter.n }}</span>
+                <div class="setlist-song-info">
+                    <h3>{{ item.song.title }}</h3>
+                    {% if item.song.composer %}<p class="setlist-song-composer">{{ item.song.composer }}</p>{% endif %}
+                </div>
+                <span class="setlist-song-files">
+                    {% if n_pdf %}<span class="chip">{{ icon('file', 12) }} {{ n_pdf }}</span>{% endif %}
+                    {% if n_audio %}<span class="chip">{{ icon('headphones', 12) }} {{ n_audio }}</span>{% endif %}
+                </span>
+                <span class="setlist-arrow">{{ icon('chevron-right') }}</span>
+            </a>
+        </li>
+        {% else %}
+        <li class="setlist-placeholder-row"><span>{{ item.placeholder_text }}</span></li>
+        {% endif %}
+        {% endfor %}
+    </ol>
+    {% else %}
+    <div class="empty-state-large">
+        <div class="empty-icon">{{ icon('list', 48) }}</div>
+        <p>Ingen sange i denne setliste endnu.</p>
+    </div>
+    {% endif %}
+</section>
+
+{{ export_dialog("export-dialog", setlist, export_url, pdf_parts) }}
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/player.js?v=2"></script>
 {% endblock %}

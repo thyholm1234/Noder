@@ -1,126 +1,106 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_player.html" import audio_card, pdf_viewer %}
 {% set active = "dashboard" %}
 
 {% block title %}{{ song.title }} - Noder{% endblock %}
 
 {% block content %}
+{% if nav %}
+<nav class="setlist-nav" aria-label="Setliste">
+    {% if nav.prev %}
+    <a href="/user/songs/{{ nav.prev.id }}?sl={{ nav.setlist.id }}" class="setlist-nav-btn" data-hotkey="ArrowLeft" title="Forrige (←)">
+        {{ icon('chevron-left') }} <span class="truncate">{{ nav.prev.title }}</span>
+    </a>
+    {% else %}<span></span>{% endif %}
+    <a href="/user/setlists/{{ nav.setlist.id }}" class="setlist-nav-center">
+        {{ icon('list', 16) }} {{ nav.setlist.name }} · {{ nav.index }}/{{ nav.total }}
+    </a>
+    {% if nav.next %}
+    <a href="/user/songs/{{ nav.next.id }}?sl={{ nav.setlist.id }}" class="setlist-nav-btn setlist-nav-btn--next" data-hotkey="ArrowRight" title="Næste (→)">
+        <span class="truncate">{{ nav.next.title }}</span> {{ icon('chevron-right') }}
+    </a>
+    {% else %}<span></span>{% endif %}
+</nav>
+{% endif %}
+
 <div class="page-header">
     <div class="breadcrumb">
-        <a href="/user/dashboard">Mine Sange</a> &rsaquo; {{ song.title }}
+        <a href="/user/dashboard">Mine sange</a> {{ icon('chevron-right', 14) }}
+        {% if nav %}<a href="/user/setlists/{{ nav.setlist.id }}">{{ nav.setlist.name }}</a> {{ icon('chevron-right', 14) }}{% endif %}
+        <span>{{ song.title }}</span>
     </div>
     <h1>{{ song.title }}</h1>
     {% if song.composer %}<p class="subtitle">{{ song.composer }}</p>{% endif %}
-</div>
-
-<!-- Description -->
-{% if song.description %}
-<div class="card">
-    <h2>&#128203; Om sangen</h2>
-    <div class="song-description">{{ song.description }}</div>
-</div>
-{% endif %}
-
-<!-- Tags -->
-{% if song.tags %}
-<div class="card mt-2">
-    <h2>Tags</h2>
-    <div class="tag-list">
-        {% for tag in song.tags.split(',') %}
-        <span class="tag-badge">{{ tag.strip() }}</span>
+    {% if song.tags %}
+    <div class="tag-list mt-1">
+        {% for tag in song.tags.split(',') if tag.strip() %}
+        <a href="/user/dashboard?q={{ tag.strip() | urlencode }}" class="tag-badge">{{ tag.strip() }}</a>
         {% endfor %}
     </div>
+    {% endif %}
+</div>
+
+{% if audio_files or pdf_files %}
+<div class="voice-bar">
+    <label for="voice-picker">{{ icon('mic', 16) }} Min stemme</label>
+    <select id="voice-picker" data-voice-picker>
+        <option value="">Ingen valgt</option>
+        {% for f in audio_files + pdf_files if f.part_name %}
+        <option value="{{ f.part_name }}">{{ f.part_name }}</option>
+        {% endfor %}
+    </select>
+    <span class="field-hint">Huskes på tværs af sange — din stemme vises først.</span>
 </div>
 {% endif %}
 
-<!-- Links -->
+{% if audio_files %}
+<section class="card">
+    <div class="card-head">
+        <h2>{{ icon('headphones') }} Stemmer</h2>
+        <span class="field-hint">Mellemrum = afspil/pause · tempo huskes</span>
+    </div>
+    <div class="audio-list" data-voice-sort>
+        {% for f in audio_files %}
+        {{ audio_card(f, "/user/files/" ~ f.id) }}
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% if pdf_files %}
+<section class="card">
+    <div class="card-head"><h2>{{ icon('file') }} Noder</h2></div>
+    {{ pdf_viewer(pdf_files, "/user/files/") }}
+</section>
+{% endif %}
+
+{% if song.description %}
+<section class="card">
+    <div class="card-head"><h2>{{ icon('sparkles') }} Om sangen</h2></div>
+    <div class="song-description">{{ song.description }}</div>
+</section>
+{% endif %}
+
 {% if song.links %}
-<div class="card mt-2">
-    <h2>&#128279; Links</h2>
+<section class="card">
+    <div class="card-head"><h2>{{ icon('link') }} Links</h2></div>
     <ul class="link-list">
         {% for link in song.links %}
-        <li>
+        <li class="link-item">
             <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" class="link-url">
-                {{ link.label or link.url }}
+                {{ icon('external', 16) }} {{ link.label or link.url }}
             </a>
         </li>
         {% endfor %}
     </ul>
-</div>
-{% endif %}
-
-<!-- PDF viewer -->
-{% if pdf_files %}
-<div class="card mt-2">
-    <h2>Noder</h2>
-    <div class="pdf-tabs">
-        <div class="tab-bar" role="tablist">
-            {% for f in pdf_files %}
-            <button class="tab-btn{% if loop.first %} tab-btn--active{% endif %}"
-                    role="tab"
-                    onclick="switchPdfTab(this, 'user-pdf-{{ f.id }}')">
-                {{ f.part_name or f.original_filename }}
-            </button>
-            {% endfor %}
-        </div>
-        {% for f in pdf_files %}
-        <div class="tab-panel{% if loop.first %} tab-panel--active{% endif %}" id="user-pdf-{{ f.id }}">
-            <div class="pdf-viewer">
-                <iframe src="/user/files/{{ f.id }}#toolbar=1&navpanes=0" type="application/pdf"></iframe>
-            </div>
-            <div class="file-actions mt-1">
-                <a href="/user/files/{{ f.id }}" target="_blank" class="btn btn-sm">Åbn i ny fane</a>
-                <a href="/user/files/{{ f.id }}?download=1" class="btn btn-sm">&#11015; Download PDF</a>
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
-
-<!-- Audio players -->
-{% if audio_files %}
-<div class="card mt-2">
-    <h2>Stemmer</h2>
-    <div class="audio-list">
-        {% for f in audio_files %}
-        <div class="audio-card">
-            <div class="audio-header">
-                <span class="audio-icon">&#127925;</span>
-                <span class="audio-title">{{ f.part_name or f.original_filename }}</span>
-            </div>
-            <audio controls preload="metadata" class="audio-full">
-                <source src="/user/files/{{ f.id }}" type="audio/mpeg">
-                Din browser understøtter ikke lyd-afspilning.
-            </audio>
-            <div class="audio-footer">
-                <a href="/user/files/{{ f.id }}?download=1" class="btn btn-sm">&#11015; Download</a>
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-</div>
+</section>
 {% endif %}
 
 {% if not pdf_files and not audio_files %}
 <div class="empty-state-large">
-    <div class="empty-icon">&#128196;</div>
+    <div class="empty-icon">{{ icon('file', 48) }}</div>
     <p>Der er ingen filer tilknyttet denne sang endnu.</p>
 </div>
 {% endif %}
-
-<div class="mt-2">
-    <a href="/user/dashboard" class="btn">&larr; Tilbage til mine sange</a>
-</div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-function switchPdfTab(btn, panelId) {
-    const tabs = btn.closest('.pdf-tabs');
-    tabs.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-btn--active'));
-    tabs.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('tab-panel--active'));
-    btn.classList.add('tab-btn--active');
-    document.getElementById(panelId).classList.add('tab-panel--active');
-}
-</script>
 {% endblock %}

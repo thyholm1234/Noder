@@ -1,0 +1,47 @@
+{% from "_icons.html" import icon %}
+
+{% macro export_button(dialog_id) -%}
+<button type="button" class="btn btn-primary" data-open-dialog="#{{ dialog_id }}">{{ icon('printer', 16) }} Eksportér PDF</button>
+{%- endmacro %}
+
+{% macro export_dialog(dialog_id, setlist, url, pdf_parts) -%}
+<dialog class="modal modal--wide" id="{{ dialog_id }}">
+    <form method="get" action="{{ url }}" class="export-form" data-export-form>
+        <div class="modal-head">
+            <h2>{{ icon('printer') }} Eksportér “{{ setlist.name }}”</h2>
+            <button type="button" class="btn btn-ghost btn-icon" data-close-dialog aria-label="Luk">{{ icon('x') }}</button>
+        </div>
+        <p class="field-hint">Alle noder samles i én PDF i setlistens rækkefølge — klar til print eller tablet.</p>
+
+        <fieldset class="option-group">
+            <legend>Hvilke noder?</legend>
+            <label class="option"><input type="radio" name="mode" value="first" checked>
+                <span><strong>Én pr. sang</strong><small>Den første PDF for hver sang (typisk partituret)</small></span></label>
+            {% if pdf_parts %}
+            <label class="option"><input type="radio" name="mode" value="part">
+                <span><strong>Foretræk stemme</strong>
+                    <small>Vælg den PDF der matcher — ellers den første
+                        <select name="part" data-voice-default>
+                            {% for p in pdf_parts %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                        </select>
+                    </small></span></label>
+            {% endif %}
+            <label class="option"><input type="radio" name="mode" value="all">
+                <span><strong>Alle PDF'er</strong><small>Alle stemmer og partiturer efter hinanden</small></span></label>
+        </fieldset>
+
+        <fieldset class="option-group option-group--checks">
+            <legend>Layout</legend>
+            <input type="hidden" name="cover" value="0">{# unchecked box sends nothing; the later checked value wins #}
+            <label class="check"><input type="checkbox" name="cover" value="1" checked> Forside med indholdsfortegnelse og sidetal</label>
+            <label class="check"><input type="checkbox" name="numbers" value="1"> Sidetal nederst på hver side</label>
+            <label class="check"><input type="checkbox" name="duplex" value="1"> Tosidet print — hver sang starter på en højreside</label>
+        </fieldset>
+
+        <div class="modal-actions">
+            <button type="submit" name="download" value="0" class="btn" formtarget="_blank">{{ icon('eye', 16) }} Åbn i browser</button>
+            <button type="submit" name="download" value="1" class="btn btn-primary">{{ icon('download', 16) }} Download PDF</button>
+        </div>
+    </form>
+</dialog>
+{%- endmacro %}

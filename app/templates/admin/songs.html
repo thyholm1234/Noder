@@ -1,45 +1,45 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% set active = "songs" %}
 
 {% block title %}Sange - Noder{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h1>Sange</h1>
-    <p class="subtitle">Administrer sange med noderne og stemmerne</p>
+<div class="page-header page-header--split">
+    <div>
+        <p class="eyebrow">Administration</p>
+        <h1>Sange</h1>
+    </div>
+    <button type="button" class="btn btn-primary" data-toggle="#new-song">{{ icon('plus', 16) }} Ny sang</button>
 </div>
 
-<div class="card">
-    <h2>Opret ny sang</h2>
+<section class="card" id="new-song" {% if total %}hidden{% endif %}>
+    <div class="card-head"><h2>{{ icon('plus') }} Opret ny sang</h2></div>
     <form method="post" action="/admin/songs" class="inline-form">
-        <div class="form-group">
-            <input type="text" name="title" placeholder="Titel" required>
-        </div>
-        <div class="form-group">
-            <input type="text" name="composer" placeholder="Komponist (valgfrit)">
-        </div>
-        <button type="submit" class="btn btn-primary">Opret</button>
+        <input type="text" name="title" placeholder="Titel" required maxlength="255" data-autofocus>
+        <input type="text" name="composer" placeholder="Komponist (valgfrit)" maxlength="255">
+        <input type="text" name="tags" placeholder="Tags, kommasepareret" maxlength="500">
+        <button type="submit" class="btn btn-primary">Opret og upload filer {{ icon('chevron-right', 14) }}</button>
     </form>
-</div>
+</section>
 
-<div class="card mt-2">
-    <h2>Alle sange</h2>
-
-    <div class="toolbar mb-1">
-        <form method="get" action="/admin/songs" class="search-form">
-            <input type="text" name="q" value="{{ q }}" placeholder="Søg på titel, komponist eller tag..." class="search-input">
+<section class="card">
+    <div class="toolbar">
+        <form method="get" action="/admin/songs" class="search-bar">
+            {{ icon('search', 18) }}
+            <input type="search" name="q" value="{{ q }}" placeholder="Søg på titel, komponist eller tag…  (tast /)" data-search-shortcut autocomplete="off">
             <input type="hidden" name="sort" value="{{ sort }}">
             <input type="hidden" name="order" value="{{ order }}">
-            <button type="submit" class="btn btn-primary">Søg</button>
-            {% if q %}<a href="/admin/songs?sort={{ sort }}&order={{ order }}" class="btn">Nulstil</a>{% endif %}
+            {% if q %}<a href="/admin/songs?sort={{ sort }}&order={{ order }}" class="btn btn-sm btn-ghost">{{ icon('x', 14) }} Nulstil</a>{% endif %}
         </form>
         <div class="table-meta">{{ total }} sang{{ 'e' if total != 1 else '' }}</div>
     </div>
 
-    {% macro sort_url(col) %}/admin/songs?sort={{ col }}&order={{ 'asc' if (sort == col and order == 'desc') else 'desc' if sort == col else 'asc' }}&q={{ q }}&page=1{% endmacro %}
+    {% macro sort_url(col) %}/admin/songs?sort={{ col }}&order={{ 'asc' if (sort == col and order == 'desc') else 'desc' if sort == col else 'asc' }}&q={{ q | urlencode }}&page=1{% endmacro %}
     {% macro sort_icon(col) %}{% if sort == col %}{{ '▲' if order == 'asc' else '▼' }}{% else %}<span class="sort-icon-idle">⇅</span>{% endif %}{% endmacro %}
 
-    {% if songs or q %}
+    {% if songs %}
+    <div class="table-wrap">
     <table class="table table-sortable">
         <thead>
             <tr>
@@ -47,70 +47,67 @@
                 <th><a href="{{ sort_url('composer') }}" class="sort-link{% if sort == 'composer' %} sort-active{% endif %}">Komponist {{ sort_icon('composer') }}</a></th>
                 <th><a href="{{ sort_url('tags') }}" class="sort-link{% if sort == 'tags' %} sort-active{% endif %}">Tags {{ sort_icon('tags') }}</a></th>
                 <th>Filer</th>
-                <th>Tildelt kor</th>
+                <th>Kor</th>
                 <th><a href="{{ sort_url('created') }}" class="sort-link{% if sort == 'created' %} sort-active{% endif %}">Oprettet {{ sort_icon('created') }}</a></th>
                 <th></th>
             </tr>
         </thead>
         <tbody>
             {% for song in songs %}
+            {% set pdf_count = song.files | selectattr('file_type', 'eq', 'pdf') | list | length %}
+            {% set audio_count = song.files | selectattr('file_type', 'eq', 'audio') | list | length %}
             <tr>
-                <td><a href="/admin/songs/{{ song.id }}">{{ song.title }}</a></td>
-                <td>{{ song.composer or '—' }}</td>
+                <td><a href="/admin/songs/{{ song.id }}" class="strong-link">{{ song.title }}</a></td>
+                <td class="muted">{{ song.composer or '—' }}</td>
                 <td>
                     {% if song.tags %}
-                    {% for tag in song.tags.split(',') %}
-                    <span class="tag-badge">{{ tag.strip() }}</span>
+                    {% for tag in song.tags.split(',') if tag.strip() %}
+                    <a href="/admin/songs?q={{ tag.strip() | urlencode }}" class="tag-badge">{{ tag.strip() }}</a>
                     {% endfor %}
-                    {% else %}—{% endif %}
+                    {% else %}<span class="muted">—</span>{% endif %}
                 </td>
-                <td>
-                    {% set pdf_count = song.files | selectattr('file_type', 'eq', 'pdf') | list | length %}
-                    {% set audio_count = song.files | selectattr('file_type', 'eq', 'audio') | list | length %}
-                    {{ pdf_count }} PDF, {{ audio_count }} lyd
+                <td class="nowrap">
+                    <span class="chip{% if not pdf_count %} chip--empty{% endif %}" title="PDF">{{ icon('file', 12) }} {{ pdf_count }}</span>
+                    <span class="chip{% if not audio_count %} chip--empty{% endif %}" title="Lyd">{{ icon('headphones', 12) }} {{ audio_count }}</span>
                 </td>
-                <td>{{ song.choir_songs | length }} kor</td>
-                <td>{{ song.created_at.strftime('%d/%m/%Y') }}</td>
+                <td class="muted">{{ song.choir_songs | length }}</td>
+                <td class="muted nowrap">{{ song.created_at.strftime('%d/%m/%Y') }}</td>
                 <td class="actions">
-                    <a href="/admin/songs/{{ song.id }}" class="btn btn-sm">Rediger</a>
+                    <a href="/admin/songs/{{ song.id }}" class="btn btn-sm btn-ghost" title="Redigér">{{ icon('edit', 14) }}</a>
                     <form method="post" action="/admin/songs/{{ song.id }}/delete" class="inline"
-                          onsubmit="return confirm('Slet sang &quot;{{ song.title }}&quot;? Alle filer slettes også.')">
-                        <button type="submit" class="btn btn-sm btn-danger">Slet</button>
+                          data-confirm="Slet “{{ song.title }}”? Alle noder og lydfiler slettes permanent.">
+                        <button type="submit" class="btn btn-sm btn-ghost btn-danger-ghost" title="Slet">{{ icon('trash', 14) }}</button>
                     </form>
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    </div>
 
     {% if total_pages > 1 %}
-    <div class="pagination">
-        {% if page > 1 %}
-        <a href="/admin/songs?sort={{ sort }}&order={{ order }}&q={{ q }}&page={{ page - 1 }}" class="btn btn-sm">&lsaquo; Forrige</a>
-        {% else %}
-        <span class="btn btn-sm btn-disabled">&lsaquo; Forrige</span>
-        {% endif %}
-
+    <nav class="pagination">
+        {% set base = "/admin/songs?sort=" ~ sort ~ "&order=" ~ order ~ "&q=" ~ (q | urlencode) %}
+        {% if page > 1 %}<a href="{{ base }}&page={{ page - 1 }}" class="btn btn-sm">{{ icon('chevron-left', 14) }} Forrige</a>
+        {% else %}<span class="btn btn-sm btn-disabled">{{ icon('chevron-left', 14) }} Forrige</span>{% endif %}
+        {% set ns = namespace(last=0) %}
         {% for p in range(1, total_pages + 1) %}
             {% if p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
-                {% if not loop.first and p > 1 and p != page - 2 and p != 2 and loop.previtem is defined and loop.previtem + 1 != p %}
-                <span class="pagination-ellipsis">&hellip;</span>
-                {% endif %}
-                <a href="/admin/songs?sort={{ sort }}&order={{ order }}&q={{ q }}&page={{ p }}"
-                   class="btn btn-sm{% if p == page %} btn-active{% endif %}">{{ p }}</a>
+                {% if ns.last and p > ns.last + 1 %}<span class="pagination-ellipsis">&hellip;</span>{% endif %}
+                <a href="{{ base }}&page={{ p }}" class="btn btn-sm{% if p == page %} btn-active{% endif %}">{{ p }}</a>
+                {% set ns.last = p %}
             {% endif %}
         {% endfor %}
-
-        {% if page < total_pages %}
-        <a href="/admin/songs?sort={{ sort }}&order={{ order }}&q={{ q }}&page={{ page + 1 }}" class="btn btn-sm">Næste &rsaquo;</a>
-        {% else %}
-        <span class="btn btn-sm btn-disabled">Næste &rsaquo;</span>
-        {% endif %}
-    </div>
+        {% if page < total_pages %}<a href="{{ base }}&page={{ page + 1 }}" class="btn btn-sm">Næste {{ icon('chevron-right', 14) }}</a>
+        {% else %}<span class="btn btn-sm btn-disabled">Næste {{ icon('chevron-right', 14) }}</span>{% endif %}
+    </nav>
     {% endif %}
 
     {% else %}
-    <p class="empty-state">Ingen sange oprettet endnu.</p>
+    <div class="empty-state-large">
+        <div class="empty-icon">{{ icon('music', 48) }}</div>
+        <p>{% if q %}Ingen sange matcher “{{ q }}”.{% else %}Ingen sange endnu — opret den første ovenfor.{% endif %}</p>
+    </div>
     {% endif %}
-</div>
+</section>
 {% endblock %}

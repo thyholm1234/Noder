@@ -1,20 +1,68 @@
-import os
+import re
 from datetime import date
 from typing import Optional
-from fastapi import APIRouter, Request, Form, UploadFile, File, Depends
+from fastapi import APIRouter, Request, Form, UploadFile, File, Depends, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, func, delete, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import Choir, User, Song, SongFile, ChoirSong, Setlist, SetlistItem, SongLink
-from app.auth import admin_required
-from app.utils import save_upload, serve_file_with_range, AUDIO_EXTENSIONS, check_quota
+from app.auth import admin_required, flash, hash_password, generate_password
+from app.services import (load_setlist, setlist_sort_key, setlist_parts, export_setlist_response, next_event)
+from app.templating import render
+from app.utils import (save_upload, serve_file_with_range, detect_file_type, part_name_from_filename,
+                       safe_external_url, remove_stored_file, download_name, UploadError)
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+
+
+def go(url: str):
+    return RedirectResponse(url, status_code=303)
+
+
+def parse_date(value: str) -> date | None:
+    try:
+        return date.fromisoformat(value) if value else None
+    except ValueError:
+        return None
+
+
+def clean_tags(value: str) -> str | None:
+    tags = []
+    for t in value.split(","):
+        t = t.strip()
+        if t and t.lower() not in (x.lower() for x in tags):
+            tags.append(t)
+    return ", ".join(tags)[:500] or None
+
+
+async def _choir_setlist(db: AsyncSession, choir_id: int, setlist_id: int) -> Setlist:
+    setlist = await db.scalar(select(Setlist).where(Setlist.id == setlist_id, Setlist.choir_id == choir_id))
+    if not setlist:
+        raise HTTPException(404, "Setlisten findes ikke")
+    return setlist
+
+
+async def _unassign(db: AsyncSession, choir_id: int, song_id: int) -> None:
+    """Remove a song from a choir — and from that choir's setlists, where members could no longer open it."""
+    await db.execute(delete(ChoirSong).where(ChoirSong.choir_id == choir_id, ChoirSong.song_id == song_id))
+    await db.execute(
+        delete(SetlistItem).where(
+            SetlistItem.song_id == song_id,
+            SetlistItem.setlist_id.in_(select(Setlist.id).where(Setlist.choir_id == choir_id)),
+        )
+    )
+    await db.commit()
+
+
+async def _next_position(db: AsyncSession, setlist_id: int) -> int:
+    max_pos = await db.scalar(
+        select(func.coalesce(func.max(SetlistItem.position), -1)).where(SetlistItem.setlist_id == setlist_id)
+    )
+    return max_pos + 1
 
 
 # ---------------------------------------------------------------------------
@@ -22,27 +70,37 @@ templates = Jinja2Templates(directory="app/templates")
 # ---------------------------------------------------------------------------
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
     choir_count = await db.scalar(select(func.count(Choir.id)))
     user_count = await db.scalar(select(func.count(User.id)))
     song_count = await db.scalar(select(func.count(Song.id)))
- 
-    # Recent songs
-    result = await db.execute(select(Song).order_by(Song.created_at.desc()).limit(5))
-    recent_songs = result.scalars().all()
+    setlist_count = await db.scalar(select(func.count(Setlist.id)))
 
-    return templates.TemplateResponse(
-        "admin/dashboard.html",
-        {
-            "request": request,
-            "choir_count": choir_count,
-            "user_count": user_count,
-            "song_count": song_count,
-            "recent_songs": recent_songs,
-        },
+    recent_songs = (await db.execute(select(Song).order_by(Song.created_at.desc()).limit(5))).scalars().all()
+
+    upcoming = (await db.execute(
+        select(Setlist)
+        .options(selectinload(Setlist.choir), selectinload(Setlist.items))
+        .where(Setlist.event_date >= date.today())
+        .order_by(Setlist.event_date)
+        .limit(6)
+    )).scalars().all()
+
+    # Songs that members can see but that have no sheet music yet
+    has_pdf = select(SongFile.song_id).where(SongFile.file_type == "pdf")
+    missing_pdf = (await db.execute(
+        select(Song)
+        .where(Song.id.notin_(has_pdf), Song.id.in_(select(ChoirSong.song_id)))
+        .order_by(Song.title)
+        .limit(8)
+    )).scalars().all()
+
+    return render(
+        request, "admin/dashboard.html",
+        choir_count=choir_count, user_count=user_count, song_count=song_count, setlist_count=setlist_count,
+        recent_songs=recent_songs, upcoming=upcoming, missing_pdf=missing_pdf,
     )
 
 
@@ -51,38 +109,41 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 @router.get("/choirs", response_class=HTMLResponse)
 async def choirs_list(request: Request, db: AsyncSession = Depends(get_db)):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
     result = await db.execute(
-        select(Choir).options(selectinload(Choir.users), selectinload(Choir.choir_songs)).order_by(Choir.name)
+        select(Choir)
+        .options(selectinload(Choir.users), selectinload(Choir.choir_songs), selectinload(Choir.setlists))
+        .order_by(Choir.name)
     )
-    choirs = result.scalars().all()
-    flash = request.session.pop("flash", None)
-
-    return templates.TemplateResponse(
-        "admin/choirs.html", {"request": request, "choirs": choirs, "flash": flash}
-    )
+    return render(request, "admin/choirs.html", choirs=result.scalars().all())
 
 
 @router.post("/choirs")
 async def choir_create(request: Request, name: str = Form(...), db: AsyncSession = Depends(get_db)):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    choir = Choir(name=name.strip())
+    name = name.strip()[:255]
+    if not name:
+        flash(request, "Koret skal have et navn", "error")
+        return go("/admin/choirs")
+    choir = Choir(name=name)
     db.add(choir)
-    await db.commit()
-    request.session["flash"] = f'Kor "{name}" oprettet'
-    return RedirectResponse("/admin/choirs", status_code=303)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        flash(request, f'Der findes allerede et kor ved navn "{name}"', "error")
+        return go("/admin/choirs")
+    flash(request, f'Kor "{name}" oprettet')
+    return go(f"/admin/choirs/{choir.id}")
 
 
 @router.get("/choirs/{choir_id}", response_class=HTMLResponse)
 async def choir_detail(request: Request, choir_id: int, db: AsyncSession = Depends(get_db)):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
     result = await db.execute(
@@ -90,119 +151,224 @@ async def choir_detail(request: Request, choir_id: int, db: AsyncSession = Depen
         .options(
             selectinload(Choir.users),
             selectinload(Choir.choir_songs).selectinload(ChoirSong.song),
-            selectinload(Choir.setlists).selectinload(Setlist.items).selectinload(SetlistItem.song),
+            selectinload(Choir.setlists).selectinload(Setlist.items).selectinload(SetlistItem.song)
+            .selectinload(Song.files),
         )
         .where(Choir.id == choir_id)
     )
     choir = result.scalar_one_or_none()
     if not choir:
-        return RedirectResponse("/admin/choirs", status_code=303)
+        return go("/admin/choirs")
 
-    # Get songs NOT yet assigned to this choir
-    assigned_ids = [cs.song_id for cs in choir.choir_songs]
-    if assigned_ids:
-        avail_result = await db.execute(select(Song).where(Song.id.notin_(assigned_ids)).order_by(Song.title))
-    else:
-        avail_result = await db.execute(select(Song).order_by(Song.title))
-    available_songs = avail_result.scalars().all()
+    assigned_ids = {cs.song_id for cs in choir.choir_songs}
+    all_songs = (await db.execute(select(Song).order_by(Song.title))).scalars().all()
+    available_songs = [s for s in all_songs if s.id not in assigned_ids]
+    assigned_songs = sorted((cs.song for cs in choir.choir_songs), key=lambda s: s.title.lower())
+    choir_songs = sorted(choir.choir_songs, key=lambda cs: cs.song.title.lower())
+    setlists = sorted(choir.setlists, key=setlist_sort_key)
 
-    # All assigned songs (for setlist management)
-    assigned_songs = [cs.song for cs in choir.choir_songs]
-
-    flash = request.session.pop("flash", None)
-
-    return templates.TemplateResponse(
-        "admin/choir_detail.html",
-        {
-            "request": request,
-            "choir": choir,
-            "available_songs": available_songs,
-            "assigned_songs": assigned_songs,
-            "flash": flash,
-            "today": date.today(),
-        },
+    return render(
+        request, "admin/choir_detail.html",
+        choir=choir,
+        users=sorted(choir.users, key=lambda u: u.username.lower()),
+        choir_songs=choir_songs,
+        available_songs=available_songs,
+        assigned_songs=assigned_songs,
+        setlists=setlists,
+        setlist_pdf_parts={sl.id: setlist_parts(sl, "pdf") for sl in setlists},
+        other_choirs=(await db.execute(select(Choir).where(Choir.id != choir_id).order_by(Choir.name))).scalars().all(),
     )
+
+
+@router.post("/choirs/{choir_id}/rename")
+async def choir_rename(request: Request, choir_id: int, name: str = Form(...), db: AsyncSession = Depends(get_db)):
+    if redirect := admin_required(request):
+        return redirect
+
+    choir = await db.get(Choir, choir_id)
+    name = name.strip()[:255]
+    if choir and name:
+        choir.name = name
+        try:
+            await db.commit()
+            flash(request, "Koret er omdøbt")
+        except IntegrityError:
+            await db.rollback()
+            flash(request, f'Der findes allerede et kor ved navn "{name}"', "error")
+    return go(f"/admin/choirs/{choir_id}")
 
 
 @router.post("/choirs/{choir_id}/delete")
 async def choir_delete(request: Request, choir_id: int, db: AsyncSession = Depends(get_db)):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
     await db.execute(delete(Choir).where(Choir.id == choir_id))
     await db.commit()
-    request.session["flash"] = "Kor slettet"
-    return RedirectResponse("/admin/choirs", status_code=303)
+    flash(request, "Kor slettet")
+    return go("/admin/choirs")
+
+
+# ---------------------------------------------------------------------------
+# Users
+# ---------------------------------------------------------------------------
+_SPLIT = re.compile(r"\s*[;\t]\s*")
 
 
 @router.post("/choirs/{choir_id}/add-user")
 async def choir_add_user(
     request: Request,
     choir_id: int,
-    username: str = Form(...),
-    password: str = Form(...),
+    users: str = Form(""),
+    username: str = Form(""),
+    password: str = Form(""),
     db: AsyncSession = Depends(get_db),
 ):
-    redirect = admin_required(request)
-    if redirect:
+    """Add one user, or many at once: one per line, optionally 'navn; adgangskode'."""
+    if redirect := admin_required(request):
         return redirect
 
-    user = User(username=username.strip(), password=password, choir_id=choir_id)
-    db.add(user)
+    if not await db.get(Choir, choir_id):
+        return go("/admin/choirs")
+
+    wanted: list[tuple[str, str]] = []
+    if username.strip():
+        wanted.append((username.strip(), password))
+    for line in users.splitlines():
+        if line.strip():
+            name, pw = (_SPLIT.split(line.strip(), maxsplit=1) + [""])[:2]
+            wanted.append((name.strip(), pw.strip()))
+
+    existing = {u.lower() for u in (await db.execute(select(User.username))).scalars()}
+    created, skipped = [], []
+    for name, pw in wanted:
+        name = name[:255]
+        if not name or name.lower() in existing:
+            skipped.append(name)
+            continue
+        pw = pw or generate_password()
+        db.add(User(username=name, password=hash_password(pw), choir_id=choir_id))
+        existing.add(name.lower())
+        created.append({"username": name, "password": pw})
+
     await db.commit()
-    request.session["flash"] = f'Bruger "{username}" oprettet'
-    return RedirectResponse(f"/admin/choirs/{choir_id}", status_code=303)
+    if created:
+        msg = f"{len(created)} bruger{'e' if len(created) != 1 else ''} oprettet — gem adgangskoderne nu, de vises kun denne ene gang."
+        if skipped:
+            msg += f" Sprunget over (findes allerede): {', '.join(skipped)}."
+        flash(request, msg, "secret", credentials=created)
+    else:
+        flash(request, "Ingen brugere oprettet — brugernavnene findes allerede" if skipped else "Angiv mindst ét brugernavn", "error")
+    return go(f"/admin/choirs/{choir_id}#members")
 
 
+@router.post("/users/{user_id}/reset-password")
+async def user_reset_password(
+    request: Request, user_id: int, password: str = Form(""), db: AsyncSession = Depends(get_db)
+):
+    if redirect := admin_required(request):
+        return redirect
+
+    user = await db.get(User, user_id)
+    if not user:
+        return go("/admin/choirs")
+    pw = password.strip() or generate_password()
+    user.password = hash_password(pw)
+    await db.commit()
+    flash(request, f'Ny adgangskode til "{user.username}" — vises kun denne ene gang.', "secret",
+          credentials=[{"username": user.username, "password": pw}])
+    return go(f"/admin/choirs/{user.choir_id}#members")
+
+
+@router.post("/users/{user_id}/rename")
+async def user_rename(request: Request, user_id: int, username: str = Form(...), db: AsyncSession = Depends(get_db)):
+    if redirect := admin_required(request):
+        return redirect
+
+    user = await db.get(User, user_id)
+    if not user:
+        return go("/admin/choirs")
+    new = username.strip()[:255]
+    clash = await db.scalar(select(User.id).where(func.lower(User.username) == new.lower(), User.id != user_id))
+    if not new or clash:
+        flash(request, f'Brugernavnet "{new}" er optaget', "error")
+    else:
+        user.username = new
+        await db.commit()
+        flash(request, f'Bruger omdøbt til "{new}"')
+    return go(f"/admin/choirs/{user.choir_id}#members")
+
+
+@router.post("/users/{user_id}/delete")
+async def user_delete(request: Request, user_id: int, db: AsyncSession = Depends(get_db)):
+    if redirect := admin_required(request):
+        return redirect
+
+    user = await db.get(User, user_id)
+    if not user:
+        return go("/admin/choirs")
+    choir_id = user.choir_id
+    await db.delete(user)
+    await db.commit()
+    flash(request, "Bruger slettet")
+    return go(f"/admin/choirs/{choir_id}#members")
+
+
+# ---------------------------------------------------------------------------
+# Choir ↔ song assignment
+# ---------------------------------------------------------------------------
 @router.post("/choirs/{choir_id}/assign-song")
-async def choir_assign_song(
-    request: Request,
-    choir_id: int,
-    song_id: int = Form(...),
-    db: AsyncSession = Depends(get_db),
-):
-    redirect = admin_required(request)
-    if redirect:
+async def choir_assign_song(request: Request, choir_id: int, db: AsyncSession = Depends(get_db)):
+    if redirect := admin_required(request):
         return redirect
 
-    cs = ChoirSong(choir_id=choir_id, song_id=song_id)
-    db.add(cs)
+    form = await request.form()
+    song_ids = {int(v) for v in form.getlist("song_id") if str(v).isdigit()}
+    already = set((await db.execute(select(ChoirSong.song_id).where(ChoirSong.choir_id == choir_id))).scalars())
+    new_ids = song_ids - already
+    for song_id in new_ids:
+        db.add(ChoirSong(choir_id=choir_id, song_id=song_id))
     await db.commit()
-    request.session["flash"] = "Sang tildelt"
-    return RedirectResponse(f"/admin/choirs/{choir_id}", status_code=303)
+    if new_ids:
+        flash(request, f"{len(new_ids)} sang{'e' if len(new_ids) != 1 else ''} tildelt")
+    return go(f"/admin/choirs/{choir_id}#songs")
 
 
 @router.post("/choirs/{choir_id}/unassign-song/{song_id}")
-async def choir_unassign_song(
-    request: Request, choir_id: int, song_id: int, db: AsyncSession = Depends(get_db)
+async def choir_unassign_song(request: Request, choir_id: int, song_id: int, db: AsyncSession = Depends(get_db)):
+    if redirect := admin_required(request):
+        return redirect
+
+    await _unassign(db, choir_id, song_id)
+    flash(request, "Sang fjernet fra koret")
+    return go(f"/admin/choirs/{choir_id}#songs")
+
+
+@router.post("/choirs/{choir_id}/highlight/{song_id}")
+async def choir_highlight_song(
+    request: Request,
+    choir_id: int,
+    song_id: int,
+    highlight_start: str = Form(""),
+    highlight_end: str = Form(""),
+    db: AsyncSession = Depends(get_db),
 ):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    await db.execute(
-        delete(ChoirSong).where(ChoirSong.choir_id == choir_id, ChoirSong.song_id == song_id)
-    )
+    cs = await db.scalar(select(ChoirSong).where(ChoirSong.choir_id == choir_id, ChoirSong.song_id == song_id))
+    if not cs:
+        return go(f"/admin/choirs/{choir_id}")
+
+    start, end = parse_date(highlight_start), parse_date(highlight_end)
+    if start and not end:
+        end = start
+    if start and end and end < start:
+        start, end = end, start
+    cs.highlight_start, cs.highlight_end = start, end
     await db.commit()
-    request.session["flash"] = "Sang fjernet fra kor"
-    return RedirectResponse(f"/admin/choirs/{choir_id}", status_code=303)
-
-
-# ---------------------------------------------------------------------------
-# Users
-# ---------------------------------------------------------------------------
-@router.post("/users/{user_id}/delete")
-async def user_delete(request: Request, user_id: int, db: AsyncSession = Depends(get_db)):
-    redirect = admin_required(request)
-    if redirect:
-        return redirect
-
-    await db.execute(delete(User).where(User.id == user_id))
-    await db.commit()
-    request.session["flash"] = "Bruger slettet"
-    referer = request.headers.get("referer", "/admin/choirs")
-    return RedirectResponse(referer, status_code=303)
+    flash(request, "Fokus opdateret" if start else "Fokus fjernet")
+    return go(f"/admin/choirs/{choir_id}#songs")
 
 
 # ---------------------------------------------------------------------------
@@ -220,20 +386,15 @@ async def songs_list(
     page: int = 1,
     db: AsyncSession = Depends(get_db),
 ):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    # Filter predicate (reused for count + data query)
+    q = q.strip()
     filter_clause = None
     if q:
-        filter_clause = (
-            Song.title.ilike(f"%{q}%") |
-            Song.composer.ilike(f"%{q}%") |
-            Song.tags.ilike(f"%{q}%")
-        )
+        like = f"%{q}%"
+        filter_clause = Song.title.ilike(like) | Song.composer.ilike(like) | Song.tags.ilike(like)
 
-    # Total count for pagination
     count_stmt = select(func.count(Song.id))
     if filter_clause is not None:
         count_stmt = count_stmt.where(filter_clause)
@@ -241,43 +402,25 @@ async def songs_list(
     total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
     page = max(1, min(page, total_pages))
 
-    # Sorting
-    sort_map = {
-        "title": Song.title,
-        "composer": Song.composer,
-        "tags": Song.tags,
-        "created": Song.created_at,
-    }
+    sort_map = {"title": Song.title, "composer": Song.composer, "tags": Song.tags, "created": Song.created_at}
     sort_col = sort_map.get(sort, Song.title)
-    sort_expr = sort_col.desc() if order == "desc" else sort_col.asc()
+    sort_expr = sort_col.desc().nulls_last() if order == "desc" else sort_col.asc().nulls_last()
 
     data_stmt = (
         select(Song)
         .options(selectinload(Song.files), selectinload(Song.choir_songs))
-        .order_by(sort_expr)
+        .order_by(sort_expr, Song.id)
         .offset((page - 1) * PER_PAGE)
         .limit(PER_PAGE)
     )
     if filter_clause is not None:
         data_stmt = data_stmt.where(filter_clause)
 
-    result = await db.execute(data_stmt)
-    songs = result.scalars().all()
-    flash = request.session.pop("flash", None)
+    songs = (await db.execute(data_stmt)).scalars().all()
 
-    return templates.TemplateResponse(
-        "admin/songs.html",
-        {
-            "request": request,
-            "songs": songs,
-            "flash": flash,
-            "q": q,
-            "sort": sort,
-            "order": order,
-            "page": page,
-            "total_pages": total_pages,
-            "total": total,
-        },
+    return render(
+        request, "admin/songs.html",
+        songs=songs, q=q, sort=sort, order=order, page=page, total_pages=total_pages, total=total,
     )
 
 
@@ -286,24 +429,26 @@ async def song_create(
     request: Request,
     title: str = Form(...),
     composer: str = Form(""),
+    tags: str = Form(""),
     db: AsyncSession = Depends(get_db),
 ):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    song = Song(title=title.strip(), composer=composer.strip() or None)
+    title = title.strip()[:255]
+    if not title:
+        flash(request, "Sangen skal have en titel", "error")
+        return go("/admin/songs")
+    song = Song(title=title, composer=composer.strip()[:255] or None, tags=clean_tags(tags))
     db.add(song)
     await db.commit()
-    await db.refresh(song)
-    request.session["flash"] = f'Sang "{title}" oprettet'
-    return RedirectResponse(f"/admin/songs/{song.id}", status_code=303)
+    flash(request, f'Sang "{title}" oprettet — upload noder og stemmer herunder')
+    return go(f"/admin/songs/{song.id}")
 
 
 @router.get("/songs/{song_id}", response_class=HTMLResponse)
 async def song_detail(request: Request, song_id: int, db: AsyncSession = Depends(get_db)):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
     result = await db.execute(
@@ -317,29 +462,26 @@ async def song_detail(request: Request, song_id: int, db: AsyncSession = Depends
     )
     song = result.scalar_one_or_none()
     if not song:
-        return RedirectResponse("/admin/songs", status_code=303)
+        return go("/admin/songs")
 
-    # All choirs — show unassigned ones in the assign form
-    assigned_ids = [cs.choir_id for cs in song.choir_songs]
-    avail_result = await db.execute(select(Choir).order_by(Choir.name))
-    all_choirs = avail_result.scalars().all()
-    available_choirs = [c for c in all_choirs if c.id not in assigned_ids]
+    assigned_ids = {cs.choir_id for cs in song.choir_songs}
+    all_choirs = (await db.execute(select(Choir).order_by(Choir.name))).scalars().all()
 
-    flash = request.session.pop("flash", None)
+    used_in = (await db.execute(
+        select(Setlist)
+        .options(selectinload(Setlist.choir))
+        .join(SetlistItem, SetlistItem.setlist_id == Setlist.id)
+        .where(SetlistItem.song_id == song_id)
+    )).scalars().all()
 
-    pdf_files = [f for f in song.files if f.file_type == "pdf"]
-    audio_files = [f for f in song.files if f.file_type == "audio"]
-
-    return templates.TemplateResponse(
-        "admin/song_detail.html",
-        {
-            "request": request,
-            "song": song,
-            "pdf_files": pdf_files,
-            "audio_files": audio_files,
-            "available_choirs": available_choirs,
-            "flash": flash,
-        },
+    files = sorted(song.files, key=lambda f: f.id)
+    return render(
+        request, "admin/song_detail.html",
+        song=song,
+        pdf_files=[f for f in files if f.file_type == "pdf"],
+        audio_files=[f for f in files if f.file_type == "audio"],
+        available_choirs=[c for c in all_choirs if c.id not in assigned_ids],
+        used_in=sorted(used_in, key=setlist_sort_key),
     )
 
 
@@ -347,43 +489,46 @@ async def song_detail(request: Request, song_id: int, db: AsyncSession = Depends
 async def song_upload_file(
     request: Request,
     song_id: int,
-    file_type: str = Form(...),
+    file_type: str = Form("auto"),
     part_name: str = Form(""),
-    file: UploadFile = File(...),
+    file: list[UploadFile] = File(...),
     db: AsyncSession = Depends(get_db),
 ):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    if not file.filename:
-        request.session["flash"] = "Ingen fil valgt"
-        return RedirectResponse(f"/admin/songs/{song_id}", status_code=303)
+    if not await db.get(Song, song_id):
+        return go("/admin/songs")
 
-    # Read file content once for quota check
-    content = await file.read()
-    if check_quota(len(content)):
-        request.session["flash"] = "Ikke nok plads — slet filer eller forhøj kvota"
-        return RedirectResponse(f"/admin/songs/{song_id}", status_code=303)
-    await file.seek(0)
+    uploads = [f for f in file if f.filename]
+    if not uploads:
+        flash(request, "Ingen fil valgt", "error")
+        return go(f"/admin/songs/{song_id}")
 
-    try:
-        file_path = await save_upload(file, file_type)
-    except RuntimeError as e:
-        request.session["flash"] = f"Fejl ved konvertering: {e}"
-        return RedirectResponse(f"/admin/songs/{song_id}", status_code=303)
+    saved, errors = [], []
+    for up in uploads:
+        kind = detect_file_type(up.filename) if file_type == "auto" else file_type
+        if kind is None:
+            errors.append(f"{up.filename}: filtypen understøttes ikke")
+            continue
+        try:
+            path = await save_upload(up, kind)
+        except UploadError as e:
+            errors.append(f"{up.filename}: {e}")
+            continue
+        name = part_name.strip() if (part_name.strip() and len(uploads) == 1) else part_name_from_filename(up.filename)
+        db.add(SongFile(song_id=song_id, file_type=kind, part_name=name or None,
+                        file_path=path, original_filename=up.filename[:255]))
+        saved.append(up.filename)
+        await db.commit()
 
-    song_file = SongFile(
-        song_id=song_id,
-        file_type=file_type,
-        part_name=part_name.strip() or None,
-        file_path=file_path,
-        original_filename=file.filename,
-    )
-    db.add(song_file)
-    await db.commit()
-    request.session["flash"] = f'Fil "{file.filename}" uploadet'
-    return RedirectResponse(f"/admin/songs/{song_id}", status_code=303)
+    if saved and not errors:
+        flash(request, f"{len(saved)} fil{'er' if len(saved) != 1 else ''} uploadet")
+    elif saved:
+        flash(request, f"{len(saved)} uploadet, {len(errors)} fejlede: " + "; ".join(errors), "error")
+    else:
+        flash(request, "Upload fejlede: " + "; ".join(errors), "error")
+    return go(f"/admin/songs/{song_id}#files")
 
 
 @router.post("/songs/{song_id}/update")
@@ -396,20 +541,18 @@ async def song_update(
     description: str = Form(""),
     db: AsyncSession = Depends(get_db),
 ):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    result = await db.execute(select(Song).where(Song.id == song_id))
-    song = result.scalar_one_or_none()
-    if song:
-        song.title = title.strip()
-        song.composer = composer.strip() or None
-        song.tags = tags.strip() or None
+    song = await db.get(Song, song_id)
+    if song and title.strip():
+        song.title = title.strip()[:255]
+        song.composer = composer.strip()[:255] or None
+        song.tags = clean_tags(tags)
         song.description = description.strip() or None
         await db.commit()
-        request.session["flash"] = "Sanginformation opdateret"
-    return RedirectResponse(f"/admin/songs/{song_id}", status_code=303)
+        flash(request, "Sanginformation gemt")
+    return go(f"/admin/songs/{song_id}")
 
 
 @router.post("/songs/{song_id}/links")
@@ -420,87 +563,69 @@ async def song_link_add(
     label: str = Form(""),
     db: AsyncSession = Depends(get_db),
 ):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    link = SongLink(song_id=song_id, url=url.strip(), label=label.strip() or None)
-    db.add(link)
+    safe = safe_external_url(url)
+    if not safe:
+        flash(request, "Linket skal starte med http:// eller https://", "error")
+        return go(f"/admin/songs/{song_id}#links")
+    db.add(SongLink(song_id=song_id, url=safe, label=label.strip()[:255] or None))
     await db.commit()
-    request.session["flash"] = "Link tilføjet"
-    return RedirectResponse(f"/admin/songs/{song_id}", status_code=303)
+    flash(request, "Link tilføjet")
+    return go(f"/admin/songs/{song_id}#links")
 
 
 @router.post("/songs/{song_id}/links/{link_id}/delete")
-async def song_link_delete(
-    request: Request,
-    song_id: int,
-    link_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    redirect = admin_required(request)
-    if redirect:
+async def song_link_delete(request: Request, song_id: int, link_id: int, db: AsyncSession = Depends(get_db)):
+    if redirect := admin_required(request):
         return redirect
 
     await db.execute(delete(SongLink).where(SongLink.id == link_id, SongLink.song_id == song_id))
     await db.commit()
-    request.session["flash"] = "Link slettet"
-    return RedirectResponse(f"/admin/songs/{song_id}", status_code=303)
+    flash(request, "Link slettet")
+    return go(f"/admin/songs/{song_id}#links")
 
 
 @router.post("/songs/{song_id}/assign")
-async def song_assign_choir(
-    request: Request,
-    song_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    redirect = admin_required(request)
-    if redirect:
+async def song_assign_choir(request: Request, song_id: int, db: AsyncSession = Depends(get_db)):
+    if redirect := admin_required(request):
         return redirect
 
     form = await request.form()
-    choir_ids = [int(v) for v in form.getlist("choir_id") if v]
-    for choir_id in choir_ids:
-        cs = ChoirSong(choir_id=choir_id, song_id=song_id)
-        db.add(cs)
-    if choir_ids:
+    choir_ids = {int(v) for v in form.getlist("choir_id") if str(v).isdigit()}
+    already = set((await db.execute(select(ChoirSong.choir_id).where(ChoirSong.song_id == song_id))).scalars())
+    new_ids = choir_ids - already
+    for choir_id in new_ids:
+        db.add(ChoirSong(choir_id=choir_id, song_id=song_id))
+    if new_ids:
         await db.commit()
-        request.session["flash"] = f"{len(choir_ids)} kor tildelt"
-    return RedirectResponse(f"/admin/songs/{song_id}", status_code=303)
+        flash(request, f"Tildelt {len(new_ids)} kor")
+    return go(f"/admin/songs/{song_id}#choirs")
 
 
 @router.post("/songs/{song_id}/unassign/{choir_id}")
-async def song_unassign_choir(
-    request: Request, song_id: int, choir_id: int, db: AsyncSession = Depends(get_db)
-):
-    redirect = admin_required(request)
-    if redirect:
+async def song_unassign_choir(request: Request, song_id: int, choir_id: int, db: AsyncSession = Depends(get_db)):
+    if redirect := admin_required(request):
         return redirect
 
-    await db.execute(
-        delete(ChoirSong).where(ChoirSong.choir_id == choir_id, ChoirSong.song_id == song_id)
-    )
-    await db.commit()
-    request.session["flash"] = "Kor fjernet fra sang"
-    return RedirectResponse(f"/admin/songs/{song_id}", status_code=303)
+    await _unassign(db, choir_id, song_id)
+    flash(request, "Kor fjernet fra sang")
+    return go(f"/admin/songs/{song_id}#choirs")
 
 
 @router.post("/songs/{song_id}/delete")
 async def song_delete(request: Request, song_id: int, db: AsyncSession = Depends(get_db)):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    # Delete associated files from disk
-    result = await db.execute(select(SongFile).where(SongFile.song_id == song_id))
-    for sf in result.scalars().all():
-        if os.path.exists(sf.file_path):
-            os.remove(sf.file_path)
-
+    paths = (await db.execute(select(SongFile.file_path).where(SongFile.song_id == song_id))).scalars().all()
     await db.execute(delete(Song).where(Song.id == song_id))
     await db.commit()
-    request.session["flash"] = "Sang slettet"
-    return RedirectResponse("/admin/songs", status_code=303)
+    for path in paths:  # only after the commit succeeded
+        remove_stored_file(path)
+    flash(request, "Sang slettet")
+    return go("/admin/songs")
 
 
 # ---------------------------------------------------------------------------
@@ -508,22 +633,18 @@ async def song_delete(request: Request, song_id: int, db: AsyncSession = Depends
 # ---------------------------------------------------------------------------
 @router.post("/files/{file_id}/delete")
 async def file_delete(request: Request, file_id: int, db: AsyncSession = Depends(get_db)):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    result = await db.execute(select(SongFile).where(SongFile.id == file_id))
-    sf = result.scalar_one_or_none()
-    if sf:
-        if os.path.exists(sf.file_path):
-            os.remove(sf.file_path)
-        song_id = sf.song_id
-        await db.delete(sf)
-        await db.commit()
-        request.session["flash"] = "Fil slettet"
-        return RedirectResponse(f"/admin/songs/{song_id}", status_code=303)
-
-    return RedirectResponse("/admin/songs", status_code=303)
+    sf = await db.get(SongFile, file_id)
+    if not sf:
+        return go("/admin/songs")
+    song_id, path = sf.song_id, sf.file_path
+    await db.delete(sf)
+    await db.commit()
+    remove_stored_file(path)
+    flash(request, "Fil slettet")
+    return go(f"/admin/songs/{song_id}#files")
 
 
 @router.post("/files/{file_id}/edit")
@@ -534,80 +655,41 @@ async def file_edit(
     file: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_db),
 ):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    result = await db.execute(select(SongFile).where(SongFile.id == file_id))
-    sf = result.scalar_one_or_none()
+    sf = await db.get(SongFile, file_id)
     if not sf:
-        return RedirectResponse("/admin/songs", status_code=303)
+        return go("/admin/songs")
 
-    sf.part_name = display_name.strip() or None
+    sf.part_name = display_name.strip()[:255] or None
 
+    old_path = None
     if file and file.filename:
-        file_content = await file.read()
-        if check_quota(len(file_content)):
-            request.session["flash"] = "Ikke nok plads — slet filer eller forhøj kvota"
-            return RedirectResponse(f"/admin/songs/{sf.song_id}", status_code=303)
-        await file.seek(0)
         try:
             new_path = await save_upload(file, sf.file_type)
-            if os.path.exists(sf.file_path):
-                os.remove(sf.file_path)
-            sf.file_path = new_path
-            sf.original_filename = file.filename
-        except RuntimeError as e:
-            request.session["flash"] = f"Fejl ved upload: {e}"
-            return RedirectResponse(f"/admin/songs/{sf.song_id}", status_code=303)
+        except UploadError as e:
+            flash(request, f"Fejl ved upload: {e}", "error")
+            return go(f"/admin/songs/{sf.song_id}#files")
+        old_path, sf.file_path, sf.original_filename = sf.file_path, new_path, file.filename[:255]
 
     await db.commit()
-    request.session["flash"] = "Fil opdateret"
-    return RedirectResponse(f"/admin/songs/{sf.song_id}", status_code=303)
+    if old_path:
+        remove_stored_file(old_path)
+    flash(request, "Fil opdateret")
+    return go(f"/admin/songs/{sf.song_id}#files")
 
 
 @router.get("/files/{file_id}")
 async def file_serve(request: Request, file_id: int, download: int = 0, db: AsyncSession = Depends(get_db)):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    result = await db.execute(select(SongFile).where(SongFile.id == file_id))
-    sf = result.scalar_one_or_none()
+    sf = await db.get(SongFile, file_id)
     if not sf:
-        return RedirectResponse("/admin/songs", status_code=303)
-
-    return await serve_file_with_range(sf.file_path, request, as_download=bool(download))
-
-
-# ---------------------------------------------------------------------------
-# Highlight songs (per choir)
-# ---------------------------------------------------------------------------
-@router.post("/choirs/{choir_id}/highlight/{song_id}")
-async def choir_highlight_song(
-    request: Request,
-    choir_id: int,
-    song_id: int,
-    highlight_start: str = Form(""),
-    highlight_end: str = Form(""),
-    db: AsyncSession = Depends(get_db),
-):
-    redirect = admin_required(request)
-    if redirect:
-        return redirect
-
-    result = await db.execute(
-        select(ChoirSong).where(ChoirSong.choir_id == choir_id, ChoirSong.song_id == song_id)
-    )
-    cs = result.scalar_one_or_none()
-    if not cs:
-        return RedirectResponse(f"/admin/choirs/{choir_id}", status_code=303)
-
-    cs.highlight_start = date.fromisoformat(highlight_start) if highlight_start else None
-    cs.highlight_end = date.fromisoformat(highlight_end) if highlight_end else None
-    await db.commit()
-    request.session["flash"] = "Highlight opdateret"
-    return RedirectResponse(f"/admin/choirs/{choir_id}", status_code=303)
+        raise HTTPException(404, "Fil ikke fundet")
+    return await serve_file_with_range(sf.file_path, request, as_download=bool(download),
+                                       filename=download_name(sf.original_filename, sf.file_path))
 
 
 # ---------------------------------------------------------------------------
@@ -618,101 +700,179 @@ async def setlist_create(
     request: Request,
     choir_id: int,
     name: str = Form(...),
+    event_date: str = Form(""),
     db: AsyncSession = Depends(get_db),
 ):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    setlist = Setlist(choir_id=choir_id, name=name.strip())
+    name = name.strip()[:255]
+    if not name or not await db.get(Choir, choir_id):
+        flash(request, "Setlisten skal have et navn", "error")
+        return go(f"/admin/choirs/{choir_id}#setlists")
+    setlist = Setlist(choir_id=choir_id, name=name, event_date=parse_date(event_date))
     db.add(setlist)
     await db.commit()
-    request.session["flash"] = f'Setliste "{name}" oprettet'
-    return RedirectResponse(f"/admin/choirs/{choir_id}", status_code=303)
+    flash(request, f'Setliste "{name}" oprettet')
+    return go(f"/admin/choirs/{choir_id}#setlist-{setlist.id}")
+
+
+@router.post("/choirs/{choir_id}/setlists/{setlist_id}/update")
+async def setlist_update(
+    request: Request,
+    choir_id: int,
+    setlist_id: int,
+    name: str = Form(...),
+    event_date: str = Form(""),
+    notes: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    if redirect := admin_required(request):
+        return redirect
+
+    setlist = await _choir_setlist(db, choir_id, setlist_id)
+    if name.strip():
+        setlist.name = name.strip()[:255]
+    setlist.event_date = parse_date(event_date)
+    setlist.notes = notes.strip() or None
+    await db.commit()
+    flash(request, "Setliste gemt")
+    return go(f"/admin/choirs/{choir_id}#setlist-{setlist_id}")
+
+
+@router.post("/choirs/{choir_id}/setlists/{setlist_id}/duplicate")
+async def setlist_duplicate(
+    request: Request,
+    choir_id: int,
+    setlist_id: int,
+    target_choir_id: int = Form(0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Copy a setlist — within the choir, or to another choir (songs get assigned there too)."""
+    if redirect := admin_required(request):
+        return redirect
+
+    source = await load_setlist(db, setlist_id, choir_id)
+    if not source:
+        raise HTTPException(404, "Setlisten findes ikke")
+    target = target_choir_id or choir_id
+    if not await db.get(Choir, target):
+        raise HTTPException(404, "Koret findes ikke")
+
+    copy = Setlist(choir_id=target, name=(f"{source.name} (kopi)" if target == choir_id else source.name)[:255],
+                   event_date=source.event_date, notes=source.notes)
+    db.add(copy)
+    await db.flush()
+
+    assigned = set((await db.execute(select(ChoirSong.song_id).where(ChoirSong.choir_id == target))).scalars())
+    for item in source.items:
+        db.add(SetlistItem(setlist_id=copy.id, song_id=item.song_id,
+                           placeholder_text=item.placeholder_text, position=item.position))
+        if item.song_id and item.song_id not in assigned:
+            db.add(ChoirSong(choir_id=target, song_id=item.song_id))
+            assigned.add(item.song_id)
+    await db.commit()
+    flash(request, "Setliste kopieret")
+    return go(f"/admin/choirs/{target}#setlist-{copy.id}")
 
 
 @router.post("/choirs/{choir_id}/setlists/{setlist_id}/add")
-async def setlist_add_song(
-    request: Request,
-    choir_id: int,
-    setlist_id: int,
-    song_id: int = Form(...),
-    db: AsyncSession = Depends(get_db),
-):
-    redirect = admin_required(request)
-    if redirect:
+async def setlist_add_song(request: Request, choir_id: int, setlist_id: int, db: AsyncSession = Depends(get_db)):
+    """Add one or more songs. Songs not yet assigned to the choir are assigned automatically."""
+    if redirect := admin_required(request):
         return redirect
 
-    # Get max position
-    max_pos = await db.scalar(
-        select(func.coalesce(func.max(SetlistItem.position), -1)).where(SetlistItem.setlist_id == setlist_id)
-    )
-    item = SetlistItem(setlist_id=setlist_id, song_id=song_id, position=max_pos + 1)
-    db.add(item)
+    await _choir_setlist(db, choir_id, setlist_id)
+    form = await request.form()
+    song_ids = [int(v) for v in form.getlist("song_id") if str(v).isdigit()]
+
+    in_list = set((await db.execute(select(SetlistItem.song_id).where(SetlistItem.setlist_id == setlist_id))).scalars())
+    assigned = set((await db.execute(select(ChoirSong.song_id).where(ChoirSong.choir_id == choir_id))).scalars())
+    pos = await _next_position(db, setlist_id)
+    added, auto_assigned = 0, 0
+    for song_id in dict.fromkeys(song_ids):
+        if song_id in in_list or not await db.get(Song, song_id):
+            continue
+        if song_id not in assigned:
+            db.add(ChoirSong(choir_id=choir_id, song_id=song_id))
+            assigned.add(song_id)
+            auto_assigned += 1
+        db.add(SetlistItem(setlist_id=setlist_id, song_id=song_id, position=pos))
+        pos += 1
+        added += 1
     await db.commit()
-    request.session["flash"] = "Sang tilføjet til setliste"
-    return RedirectResponse(f"/admin/choirs/{choir_id}", status_code=303)
 
-
-@router.post("/choirs/{choir_id}/setlists/{setlist_id}/remove-item/{item_id}")
-async def setlist_remove_item(
-    request: Request,
-    choir_id: int,
-    setlist_id: int,
-    item_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    redirect = admin_required(request)
-    if redirect:
-        return redirect
-
-    await db.execute(
-        delete(SetlistItem).where(SetlistItem.id == item_id, SetlistItem.setlist_id == setlist_id)
-    )
-    await db.commit()
-    request.session["flash"] = "Fjernet fra setliste"
-    return RedirectResponse(f"/admin/choirs/{choir_id}", status_code=303)
+    if added:
+        msg = f"{added} sang{'e' if added != 1 else ''} tilføjet"
+        if auto_assigned:
+            msg += f" ({auto_assigned} også tildelt koret)"
+        flash(request, msg)
+    return go(f"/admin/choirs/{choir_id}#setlist-{setlist_id}")
 
 
 @router.post("/choirs/{choir_id}/setlists/{setlist_id}/add-placeholder")
 async def setlist_add_placeholder(
-    request: Request,
-    choir_id: int,
-    setlist_id: int,
-    title: str = Form(...),
-    db: AsyncSession = Depends(get_db),
+    request: Request, choir_id: int, setlist_id: int, title: str = Form(""), db: AsyncSession = Depends(get_db)
 ):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    max_pos = await db.scalar(
-        select(func.coalesce(func.max(SetlistItem.position), -1)).where(SetlistItem.setlist_id == setlist_id)
-    )
-    item = SetlistItem(setlist_id=setlist_id, song_id=None, placeholder_text=title.strip(), position=max_pos + 1)
-    db.add(item)
+    await _choir_setlist(db, choir_id, setlist_id)
+    db.add(SetlistItem(setlist_id=setlist_id, song_id=None, placeholder_text=title.strip()[:255] or "Pause",
+                       position=await _next_position(db, setlist_id)))
     await db.commit()
-    request.session["flash"] = "Separator tilføjet"
-    return RedirectResponse(f"/admin/choirs/{choir_id}", status_code=303)
+    flash(request, "Separator tilføjet")
+    return go(f"/admin/choirs/{choir_id}#setlist-{setlist_id}")
+
+
+@router.post("/choirs/{choir_id}/setlists/{setlist_id}/items/{item_id}/rename")
+async def setlist_rename_placeholder(
+    request: Request, choir_id: int, setlist_id: int, item_id: int, title: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    if redirect := admin_required(request):
+        return redirect
+
+    await _choir_setlist(db, choir_id, setlist_id)
+    await db.execute(
+        update(SetlistItem)
+        .where(SetlistItem.id == item_id, SetlistItem.setlist_id == setlist_id, SetlistItem.song_id.is_(None))
+        .values(placeholder_text=title.strip()[:255] or "Pause")
+    )
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/choirs/{choir_id}/setlists/{setlist_id}/remove-item/{item_id}")
+async def setlist_remove_item(
+    request: Request, choir_id: int, setlist_id: int, item_id: int, db: AsyncSession = Depends(get_db)
+):
+    if redirect := admin_required(request):
+        return redirect
+
+    await _choir_setlist(db, choir_id, setlist_id)
+    await db.execute(delete(SetlistItem).where(SetlistItem.id == item_id, SetlistItem.setlist_id == setlist_id))
+    await db.commit()
+    flash(request, "Fjernet fra setlisten")
+    return go(f"/admin/choirs/{choir_id}#setlist-{setlist_id}")
 
 
 @router.post("/choirs/{choir_id}/setlists/{setlist_id}/reorder")
-async def setlist_reorder(
-    request: Request,
-    choir_id: int,
-    setlist_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    redirect = admin_required(request)
-    if redirect:
-        return redirect
+async def setlist_reorder(request: Request, choir_id: int, setlist_id: int, db: AsyncSession = Depends(get_db)):
+    if request.session.get("role") != "admin":
+        raise HTTPException(401, "Log ind igen")
 
+    await _choir_setlist(db, choir_id, setlist_id)
     body = await request.json()
-    order = body.get("order", [])
-    for pos, item_id in enumerate(order):
+    order = body.get("order", []) if isinstance(body, dict) else []
+    try:
+        ids = [int(i) for i in order]
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Ugyldig rækkefølge")
+    for pos, item_id in enumerate(ids):
         await db.execute(
             update(SetlistItem)
-            .where(SetlistItem.id == int(item_id), SetlistItem.setlist_id == setlist_id)
+            .where(SetlistItem.id == item_id, SetlistItem.setlist_id == setlist_id)
             .values(position=pos)
         )
     await db.commit()
@@ -720,20 +880,25 @@ async def setlist_reorder(
 
 
 @router.post("/choirs/{choir_id}/setlists/{setlist_id}/delete")
-async def setlist_delete(
-    request: Request,
-    choir_id: int,
-    setlist_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    redirect = admin_required(request)
-    if redirect:
+async def setlist_delete(request: Request, choir_id: int, setlist_id: int, db: AsyncSession = Depends(get_db)):
+    if redirect := admin_required(request):
         return redirect
 
-    await db.execute(delete(Setlist).where(Setlist.id == setlist_id))
+    await db.execute(delete(Setlist).where(Setlist.id == setlist_id, Setlist.choir_id == choir_id))
     await db.commit()
-    request.session["flash"] = "Setliste slettet"
-    return RedirectResponse(f"/admin/choirs/{choir_id}", status_code=303)
+    flash(request, "Setliste slettet")
+    return go(f"/admin/choirs/{choir_id}#setlists")
+
+
+@router.get("/choirs/{choir_id}/setlists/{setlist_id}/export.pdf")
+async def setlist_export(request: Request, choir_id: int, setlist_id: int, db: AsyncSession = Depends(get_db)):
+    if redirect := admin_required(request):
+        return redirect
+
+    setlist = await load_setlist(db, setlist_id, choir_id, with_files=True)
+    if not setlist:
+        raise HTTPException(404, "Setlisten findes ikke")
+    return await export_setlist_response(setlist, request.query_params)
 
 
 # ---------------------------------------------------------------------------
@@ -741,53 +906,35 @@ async def setlist_delete(
 # ---------------------------------------------------------------------------
 @router.get("/choirs/{choir_id}/preview", response_class=HTMLResponse)
 async def choir_preview(request: Request, choir_id: int, db: AsyncSession = Depends(get_db)):
-    redirect = admin_required(request)
-    if redirect:
+    if redirect := admin_required(request):
         return redirect
 
-    choir_result = await db.execute(select(Choir).where(Choir.id == choir_id))
-    choir = choir_result.scalar_one_or_none()
+    choir = await db.get(Choir, choir_id)
     if not choir:
-        return RedirectResponse("/admin/choirs", status_code=303)
+        return go("/admin/choirs")
 
     today = date.today()
-
-    # All songs assigned to choir with highlight info
-    result = await db.execute(
+    rows = (await db.execute(
         select(Song, ChoirSong)
         .join(ChoirSong, ChoirSong.song_id == Song.id)
         .where(ChoirSong.choir_id == choir_id)
         .order_by(Song.title)
-    )
-    rows = result.all()
+    )).all()
 
-    highlighted = []
-    songs = []
+    songs, highlighted = [], []
     for song, cs in rows:
-        is_hl = (
-            cs.highlight_start and cs.highlight_end
-            and cs.highlight_start <= today <= cs.highlight_end
-        )
         songs.append((song, cs.assigned_at))
-        if is_hl:
-            highlighted.append(song)
+        if cs.highlight_start and cs.highlight_end and cs.highlight_start <= today <= cs.highlight_end:
+            highlighted.append((song, cs))
 
-    # Setlists
-    sl_result = await db.execute(
+    setlists = (await db.execute(
         select(Setlist)
         .options(selectinload(Setlist.items).selectinload(SetlistItem.song))
         .where(Setlist.choir_id == choir_id)
-        .order_by(Setlist.name)
-    )
-    setlists = sl_result.scalars().all()
+    )).scalars().all()
+    setlists = sorted(setlists, key=setlist_sort_key)
 
-    return templates.TemplateResponse(
-        "admin/choir_preview.html",
-        {
-            "request": request,
-            "choir": choir,
-            "songs": songs,
-            "highlighted": highlighted,
-            "setlists": setlists,
-        },
+    return render(
+        request, "admin/choir_preview.html",
+        choir=choir, songs=songs, highlighted=highlighted, setlists=setlists, next_setlist=next_event(setlists),
     )

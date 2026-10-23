@@ -1,0 +1,45 @@
+{% from "_icons.html" import icon %}
+
+{% macro audio_card(f, src, admin=false) -%}
+<div class="audio-card" data-voice="{{ f.part_name or '' }}" id="file-{{ f.id }}">
+    <div class="audio-header">
+        <span class="audio-icon">{{ icon('headphones', 18) }}</span>
+        <span class="audio-title">{{ f.part_name or f.original_filename }}</span>
+        <span class="mine-badge">Min stemme</span>
+        <div class="audio-header-actions">
+            {{ caller() if caller else '' }}
+            <a href="{{ src }}?download=1" class="btn btn-sm btn-ghost" title="Download">{{ icon('download', 15) }}</a>
+        </div>
+    </div>
+    <audio controls preload="metadata" data-enhance src="{{ src }}"></audio>
+</div>
+{%- endmacro %}
+
+{% macro pdf_viewer(pdf_files, base) -%}
+<div class="tabs" data-tabs>
+    {% if pdf_files | length > 1 %}
+    <div class="tab-bar" role="tablist">
+        {% for f in pdf_files %}
+        <button type="button" class="tab-btn{% if loop.first %} tab-btn--active{% endif %}" role="tab"
+                data-tab="pdf-{{ f.id }}" data-voice="{{ f.part_name or '' }}">
+            {{ f.part_name or f.original_filename }}
+        </button>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% for f in pdf_files %}
+    <div class="tab-panel{% if loop.first %} tab-panel--active{% endif %}" id="pdf-{{ f.id }}" role="tabpanel">
+        <div class="pdf-viewer" id="viewer-{{ f.id }}">
+            <iframe {% if loop.first %}src{% else %}data-src{% endif %}="{{ base }}{{ f.id }}#toolbar=1&navpanes=0&view=FitH"
+                    title="{{ f.part_name or f.original_filename }}"></iframe>
+        </div>
+        <div class="pdf-actions-bar">
+            <button type="button" class="btn btn-sm" data-fullscreen="#viewer-{{ f.id }}">{{ icon('maximize', 15) }} Fuld skærm</button>
+            <a href="{{ base }}{{ f.id }}" target="_blank" rel="noopener" class="btn btn-sm">{{ icon('external', 15) }} Ny fane</a>
+            <a href="{{ base }}{{ f.id }}?download=1" class="btn btn-sm">{{ icon('download', 15) }} Download</a>
+            {{ caller(f) if caller else '' }}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{%- endmacro %}

@@ -1,87 +1,61 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_macros.html" import setlist_card, song_card %}
 {% set active = "choirs" %}
 
-{% block title %}{{ choir.name }} – Dashboard preview{% endblock %}
+{% block title %}{{ choir.name }} – medlemsvisning{% endblock %}
 
 {% block content %}
+<div class="callout callout--info">
+    {{ icon('eye', 16) }}
+    <div>Du ser <strong>{{ choir.name }}</strong> som et medlem ser det.
+        <a href="/admin/choirs/{{ choir.id }}">Tilbage til administration</a></div>
+</div>
+
 <div class="page-header">
-    <div class="breadcrumb">
-        <a href="/admin/choirs">Kor</a> &rsaquo; <a href="/admin/choirs/{{ choir.id }}">{{ choir.name }}</a> &rsaquo; Dashboard preview
-    </div>
-    <h1>{{ choir.name }} — Medlemmernes visning</h1>
-    <p class="subtitle">Forhåndsvisning af hvad kormedlemmer ser</p>
+    <p class="eyebrow">{{ choir.name }}</p>
+    <h1>Mine sange</h1>
+    {% if next_setlist %}
+    <p class="subtitle">Næste gang: <strong>{{ next_setlist.name }}</strong> · {{ next_setlist.event_date | danish_date }}</p>
+    {% endif %}
 </div>
 
-<!-- Highlighted songs -->
 {% if highlighted %}
-<div class="card highlight-card">
-    <h2>&#11088; I fokus lige nu</h2>
+<section class="card card--highlight">
+    <div class="card-head"><h2>{{ icon('star') }} I fokus lige nu</h2></div>
     <div class="song-grid">
-        {% for song in highlighted %}
-        <a href="/admin/songs/{{ song.id }}" class="song-card song-card--highlight">
-            <div class="song-card-icon">&#11088;</div>
-            <div class="song-card-body">
-                <h3>{{ song.title }}</h3>
-                {% if song.composer %}<p class="song-composer">{{ song.composer }}</p>{% endif %}
-            </div>
-        </a>
+        {% for song, cs in highlighted %}
+        {{ song_card(song, "/admin/songs/" ~ song.id, highlight=true, note="Til " ~ (cs.highlight_end | danish_date)) }}
         {% endfor %}
     </div>
-</div>
+</section>
 {% endif %}
 
-<!-- Setlists -->
-{% if setlists %}
-{% set non_empty_setlists = setlists | selectattr('items') | list %}
-{% if non_empty_setlists %}
-<div class="card mt-2">
-    <h2>&#127926; Setlister</h2>
+{% set visible = setlists | selectattr('items') | list %}
+{% if visible %}
+<section class="card">
+    <div class="card-head"><h2>{{ icon('list') }} Setlister</h2></div>
     <div class="song-grid">
-        {% for setlist in non_empty_setlists %}
-        <div class="song-card" style="cursor:default;">
-            <div class="song-card-icon">&#127926;</div>
-            <div class="song-card-body">
-                <h3>{{ setlist.name }}</h3>
-                <p class="song-composer">{{ setlist.items | selectattr('song') | list | length }} sange</p>
-                <ul style="margin-top:.5rem; padding-left:1rem; font-size:.85rem; color:var(--text-light);">
-                    {% for item in setlist.items %}
-                    {% if item.song %}<li>{{ item.song.title }}</li>
-                    {% else %}<li style="list-style:none; font-style:italic;">— {{ item.placeholder_text }} —</li>{% endif %}
-                    {% endfor %}
-                </ul>
-            </div>
-        </div>
+        {% for setlist in visible %}
+        {{ setlist_card(setlist, "/admin/choirs/" ~ choir.id ~ "#setlist-" ~ setlist.id, is_next=(next_setlist and setlist.id == next_setlist.id)) }}
         {% endfor %}
     </div>
-</div>
-{% endif %}
+</section>
 {% endif %}
 
-<!-- All songs -->
-<div class="card mt-2">
-    <h2>Alle sange</h2>
+<section class="card">
+    <div class="card-head"><h2>{{ icon('music') }} Alle sange <span class="count">{{ songs | length }}</span></h2></div>
     {% if songs %}
     <div class="song-grid">
         {% for song, assigned_at in songs %}
-        <a href="/admin/songs/{{ song.id }}" class="song-card">
-            <div class="song-card-icon">&#9836;</div>
-            <div class="song-card-body">
-                <h3>{{ song.title }}</h3>
-                {% if song.composer %}<p class="song-composer">{{ song.composer }}</p>{% endif %}
-                <p class="song-date">Tildelt {{ assigned_at.strftime('%d/%m/%Y') }}</p>
-            </div>
-        </a>
+        {{ song_card(song, "/admin/songs/" ~ song.id, note="Tilføjet " ~ assigned_at.strftime('%d/%m/%Y')) }}
         {% endfor %}
     </div>
     {% else %}
     <div class="empty-state-large">
-        <div class="empty-icon">&#9836;</div>
+        <div class="empty-icon">{{ icon('music', 48) }}</div>
         <p>Ingen sange tildelt endnu.</p>
     </div>
     {% endif %}
-</div>
-
-<div class="mt-2">
-    <a href="/admin/choirs/{{ choir.id }}" class="btn">&larr; Tilbage til koradministration</a>
-</div>
+</section>
 {% endblock %}

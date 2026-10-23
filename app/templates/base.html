@@ -1,68 +1,122 @@
+{% from "_icons.html" import icon %}
+{%- set role = request.session.get('role') -%}
 <!DOCTYPE html>
 <html lang="da">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token(request) }}">
+    <meta name="theme-color" content="#151a2d">
     <title>{% block title %}Noder{% endblock %}</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <script>
+        // Apply saved theme before first paint (no flash)
+        try { var t = localStorage.getItem('noder.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+    </script>
 </head>
 <body>
+    <a class="skip-link" href="#main">Spring til indhold</a>
     <div class="layout">
-        <aside class="sidebar">
+        <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <a href="/" class="logo">&#9835; Noder</a>
+                <a href="/" class="logo">
+                    <span class="logo-mark">{{ icon('music', 18) }}</span>
+                    <span>Noder</span>
+                </a>
+                <button type="button" class="sidebar-toggle" data-toggle-class="sidebar--open" data-target="#sidebar" aria-label="Menu">
+                    {{ icon('menu', 22) }}
+                </button>
             </div>
             <nav class="sidebar-nav">
-                {% if request.session.get('role') == 'admin' %}
+                {% if role == 'admin' %}
                 <a href="/admin/dashboard" class="nav-link {% if active == 'dashboard' %}active{% endif %}">
-                    <span class="nav-icon">&#9776;</span> Dashboard
+                    {{ icon('grid') }} Overblik
                 </a>
                 <a href="/admin/choirs" class="nav-link {% if active == 'choirs' %}active{% endif %}">
-                    <span class="nav-icon">&#9834;</span> Kor
+                    {{ icon('users') }} Kor
                 </a>
                 <a href="/admin/songs" class="nav-link {% if active == 'songs' %}active{% endif %}">
-                    <span class="nav-icon">&#9836;</span> Sange
+                    {{ icon('music') }} Sange
                 </a>
-                {% elif request.session.get('role') == 'user' %}
+                {% elif role == 'user' %}
                 <a href="/user/dashboard" class="nav-link {% if active == 'dashboard' %}active{% endif %}">
-                    <span class="nav-icon">&#9836;</span> Mine Sange
+                    {{ icon('music') }} Mine sange
+                </a>
+                <a href="/user/account" class="nav-link {% if active == 'account' %}active{% endif %}">
+                    {{ icon('key') }} Min konto
                 </a>
                 {% endif %}
             </nav>
             <div class="sidebar-footer">
-                <div class="sidebar-identity">
-                    {% if request.session.get('role') == 'user' %}
-                    <div class="sidebar-pill">&#128100; {{ request.session.get('display_name', '') }}</div>
-                    {% elif request.session.get('role') == 'admin' %}
-                    <div class="sidebar-pill">&#128737; Admin</div>
-                    {% endif %}
-                    <a href="/logout" class="sidebar-pill sidebar-pill--logout">&#128682; Log ud</a>
-                </div>
-                {% if request.session.get('role') == 'admin' %}
+                {% if role == 'admin' %}
                 {% set storage = get_storage() %}
-                <div class="storage-widget">
-                    <div class="storage-label">Lagerplads</div>
+                <div class="storage-widget" title="PDF: {{ storage.pdf_display }} · Lyd: {{ storage.audio_display }}">
+                    <div class="storage-label">{{ icon('database', 14) }} Lagerplads <span>{{ storage.pct }}%</span></div>
                     <div class="storage-bar">
                         <div class="storage-bar-fill{% if storage.pct > 90 %} storage-bar-danger{% elif storage.pct > 70 %} storage-bar-warn{% endif %}" style="width:{{ storage.pct }}%"></div>
                     </div>
-                    <div class="storage-details">
-                        {{ storage.total_display }} / {{ storage.quota_display }}
-                    </div>
-                    <div class="storage-breakdown">
-                        PDF: {{ storage.pdf_display }} &middot; Lyd: {{ storage.audio_display }}
-                    </div>
+                    <div class="storage-details">{{ storage.total_display }} af {{ storage.quota_display }}</div>
                 </div>
                 {% endif %}
+                <div class="sidebar-identity">
+                    {% if role == 'user' %}
+                    <a href="/user/account" class="sidebar-pill">{{ icon('user', 16) }} <span class="truncate">{{ request.session.get('display_name', '') }}</span></a>
+                    {% elif role == 'admin' %}
+                    <div class="sidebar-pill">{{ icon('shield', 16) }} Administrator</div>
+                    {% endif %}
+                    <div class="sidebar-row">
+                        <button type="button" class="sidebar-pill sidebar-pill--icon" data-theme-toggle title="Skift lyst/mørkt tema" aria-label="Skift tema">
+                            <span class="theme-icon-light">{{ icon('moon', 16) }}</span>
+                            <span class="theme-icon-dark">{{ icon('sun', 16) }}</span>
+                        </button>
+                        {% if role %}
+                        <form method="post" action="/logout" class="sidebar-logout">
+                            <button type="submit" class="sidebar-pill sidebar-pill--logout">{{ icon('logout', 16) }} Log ud</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </aside>
-        <main class="content">
-            {% if flash %}
-            <div class="flash-message">{{ flash }}</div>
-            {% endif %}
+        <main class="content" id="main">
             {% block content %}{% endblock %}
         </main>
     </div>
-    <script src="/static/app.js"></script>
+
+    {% set flash = flash or get_flash(request) %}
+    <div class="toast-stack" id="toasts" aria-live="polite">
+        {% if flash %}
+        <div class="toast toast--{{ flash.kind }}" {% if flash.kind == 'secret' %}data-sticky{% endif %}>
+            <div class="toast-body">
+                <div>{{ flash.message }}</div>
+                {% if flash.credentials %}
+                <table class="credentials">
+                    {% for c in flash.credentials %}
+                    <tr><td>{{ c.username }}</td><td><code>{{ c.password }}</code></td></tr>
+                    {% endfor %}
+                </table>
+                <button type="button" class="btn btn-sm" data-copy-text="{% for c in flash.credentials %}{{ c.username }}: {{ c.password }}
+{% endfor %}">{{ icon('copy', 14) }} Kopiér alle</button>
+                {% endif %}
+            </div>
+            <button type="button" class="toast-close" aria-label="Luk">{{ icon('x', 16) }}</button>
+        </div>
+        {% endif %}
+    </div>
+
+    <dialog class="modal" id="confirm-dialog">
+        <form method="dialog">
+            <div class="modal-icon">{{ icon('alert', 24) }}</div>
+            <p class="modal-message" id="confirm-message">Er du sikker?</p>
+            <div class="modal-actions">
+                <button value="cancel" class="btn">Annullér</button>
+                <button value="ok" class="btn btn-danger" id="confirm-ok">Ja, fortsæt</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script src="/static/app.js?v=2"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

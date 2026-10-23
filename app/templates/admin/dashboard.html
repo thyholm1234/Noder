@@ -1,69 +1,99 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% set active = "dashboard" %}
 
-{% block title %}Admin Dashboard - Noder{% endblock %}
+{% block title %}Overblik - Noder{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h1>Dashboard</h1>
-    <p class="subtitle">Overblik over Noder-systemet</p>
+    <p class="eyebrow">Administration</p>
+    <h1>Overblik</h1>
 </div>
 
 <div class="stats-grid">
+    <a href="/admin/choirs" class="stat-card">
+        <span class="stat-icon">{{ icon('users', 20) }}</span>
+        <span class="stat-number">{{ choir_count }}</span>
+        <span class="stat-label">Kor</span>
+    </a>
+    <a href="/admin/choirs" class="stat-card">
+        <span class="stat-icon">{{ icon('user', 20) }}</span>
+        <span class="stat-number">{{ user_count }}</span>
+        <span class="stat-label">Medlemmer</span>
+    </a>
+    <a href="/admin/songs" class="stat-card">
+        <span class="stat-icon">{{ icon('music', 20) }}</span>
+        <span class="stat-number">{{ song_count }}</span>
+        <span class="stat-label">Sange</span>
+    </a>
     <div class="stat-card">
-        <div class="stat-number">{{ choir_count }}</div>
-        <div class="stat-label">Kor</div>
-        <a href="/admin/choirs" class="stat-link">Administrer &rarr;</a>
-    </div>
-    <div class="stat-card">
-        <div class="stat-number">{{ user_count }}</div>
-        <div class="stat-label">Brugere</div>
-        <a href="/admin/choirs" class="stat-link">Se brugere &rarr;</a>
-    </div>
-    <div class="stat-card">
-        <div class="stat-number">{{ song_count }}</div>
-        <div class="stat-label">Sange</div>
-        <a href="/admin/songs" class="stat-link">Administrer &rarr;</a>
+        <span class="stat-icon">{{ icon('list', 20) }}</span>
+        <span class="stat-number">{{ setlist_count }}</span>
+        <span class="stat-label">Setlister</span>
     </div>
 </div>
 
-{% if recent_songs %}
-<div class="card mt-2">
-    <h2>Seneste sange</h2>
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Titel</th>
-                <th>Komponist</th>
-                <th>Oprettet</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for song in recent_songs %}
-            <tr>
-                <td>{{ song.title }}</td>
-                <td>{{ song.composer or '—' }}</td>
-                <td>{{ song.created_at.strftime('%d/%m/%Y') }}</td>
-                <td><a href="/admin/songs/{{ song.id }}" class="btn btn-sm">Vis</a></td>
-            </tr>
+<div class="grid-2">
+    <section class="card">
+        <div class="card-head"><h2>{{ icon('calendar') }} Kommende</h2></div>
+        {% if upcoming %}
+        <ul class="plain-list">
+            {% for sl in upcoming %}
+            {% set days = (sl.event_date - today()).days %}
+            <li>
+                <a href="/admin/choirs/{{ sl.choir_id }}#setlist-{{ sl.id }}" class="list-row">
+                    <div class="date-badge date-badge--sm">
+                        <span class="date-badge-day">{{ sl.event_date.day }}</span>
+                        <span class="date-badge-month">{{ ['jan','feb','mar','apr','maj','jun','jul','aug','sep','okt','nov','dec'][sl.event_date.month - 1] }}</span>
+                    </div>
+                    <div class="list-row-main">
+                        <strong>{{ sl.name }}</strong>
+                        <span class="muted">{{ sl.choir.name }} · {{ sl.items | selectattr('song_id') | list | length }} sange</span>
+                    </div>
+                    <span class="pill">{% if days == 0 %}i dag{% elif days == 1 %}i morgen{% else %}om {{ days }} dage{% endif %}</span>
+                </a>
+            </li>
             {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
+        </ul>
+        {% else %}
+        <p class="empty-state">Ingen setlister med dato forude. Giv en setliste en dato, så dukker den op her.</p>
+        {% endif %}
+    </section>
 
-<div class="quick-actions mt-2">
-    <h2>Hurtige handlinger</h2>
-    <div class="action-grid">
-        <a href="/admin/choirs" class="action-card">
-            <span class="action-icon">&#9834;</span>
-            <span>Opret nyt kor</span>
-        </a>
-        <a href="/admin/songs" class="action-card">
-            <span class="action-icon">&#9836;</span>
-            <span>Tilføj ny sang</span>
-        </a>
-    </div>
+    <section class="card">
+        <div class="card-head"><h2>{{ icon('alert') }} Mangler noder</h2></div>
+        {% if missing_pdf %}
+        <p class="field-hint mb-1">Sange som kor kan se, men som ikke har en PDF endnu:</p>
+        <ul class="plain-list">
+            {% for song in missing_pdf %}
+            <li><a href="/admin/songs/{{ song.id }}#files" class="list-row">
+                <div class="list-row-main"><strong>{{ song.title }}</strong>{% if song.composer %}<span class="muted">{{ song.composer }}</span>{% endif %}</div>
+                {{ icon('upload', 16) }}
+            </a></li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="empty-state">{{ icon('check', 16) }} Alle tildelte sange har noder.</p>
+        {% endif %}
+    </section>
 </div>
+
+<section class="card">
+    <div class="card-head">
+        <h2>{{ icon('sparkles') }} Seneste sange</h2>
+        <a href="/admin/songs" class="btn btn-sm">Alle sange {{ icon('chevron-right', 14) }}</a>
+    </div>
+    {% if recent_songs %}
+    <ul class="plain-list">
+        {% for song in recent_songs %}
+        <li><a href="/admin/songs/{{ song.id }}" class="list-row">
+            <div class="list-row-main"><strong>{{ song.title }}</strong><span class="muted">{{ song.composer or '—' }}</span></div>
+            <span class="muted">{{ song.created_at.strftime('%d/%m/%Y') }}</span>
+        </a></li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-state">Ingen sange endnu. <a href="/admin/songs">Opret den første</a>.</p>
+    {% endif %}
+</section>
 {% endblock %}

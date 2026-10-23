@@ -1,35 +1,49 @@
+{% from "_icons.html" import icon %}
 <!DOCTYPE html>
 <html lang="da">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#151a2d">
     <title>Log ind - Noder</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <script>try { var t = localStorage.getItem('noder.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
 </head>
 <body class="login-body">
+    <div class="login-staff" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+    </div>
     <div class="login-container">
         <div class="login-card">
             <div class="login-header">
-                <h1>&#9835; Noder</h1>
-                <p>Deling af noder og stemmer</p>
+                <div class="login-mark">{{ icon('music', 28) }}</div>
+                <h1>Noder</h1>
+                <p>Noder og stemmer til dit kor</p>
             </div>
             {% if error %}
-            <div class="login-error">{{ error }}</div>
+            <div class="login-error" role="alert">{{ icon('alert', 16) }} {{ error }}</div>
             {% endif %}
             <form method="post" action="/login" class="login-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
                 <div class="form-group">
                     <label for="username">Brugernavn</label>
-                    <input type="text" id="username" name="username" required autofocus
-                           placeholder="Indtast brugernavn">
+                    <input type="text" id="username" name="username" required
+                           value="{{ username }}" {% if not username %}autofocus{% endif %}
+                           autocomplete="username" autocapitalize="none" spellcheck="false">
                 </div>
                 <div class="form-group">
                     <label for="password">Adgangskode</label>
-                    <input type="password" id="password" name="password" required
-                           placeholder="Indtast adgangskode">
+                    <div class="password-field">
+                        <input type="password" id="password" name="password" required
+                               {% if username %}autofocus{% endif %} autocomplete="current-password">
+                        <button type="button" class="password-reveal" data-reveal="#password" aria-label="Vis adgangskode">{{ icon('eye', 16) }}</button>
+                    </div>
                 </div>
-                <button type="submit" class="btn btn-primary btn-block">Log ind</button>
+                <button type="submit" class="btn btn-primary btn-block btn-lg">Log ind</button>
             </form>
         </div>
     </div>
+    <script src="/static/app.js?v=2"></script>
 </body>
 </html>

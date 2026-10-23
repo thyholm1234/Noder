@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set active = "account" %}
+
+{% block title %}Min konto - Noder{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <p class="eyebrow">{{ choir.name if choir else '' }}</p>
+    <h1>Min konto</h1>
+    <p class="subtitle">Logget ind som <strong>{{ member.username }}</strong></p>
+</div>
+
+<section class="card card--narrow">
+    <div class="card-head"><h2>{{ icon('key') }} Skift adgangskode</h2></div>
+    <form method="post" action="/user/account/password" class="stack">
+        <input type="text" name="username" value="{{ member.username }}" autocomplete="username" hidden>
+        <div class="form-group">
+            <label for="current">Nuværende adgangskode</label>
+            <input type="password" id="current" name="current" required autocomplete="current-password">
+        </div>
+        <div class="form-group">
+            <label for="new">Ny adgangskode <span class="field-hint">(mindst 8 tegn)</span></label>
+            <input type="password" id="new" name="new" required minlength="8" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+            <label for="confirm">Gentag ny adgangskode</label>
+            <input type="password" id="confirm" name="confirm" required minlength="8" autocomplete="new-password"
+                   data-match="#new" data-match-message="Adgangskoderne er ikke ens">
+        </div>
+        <div><button type="submit" class="btn btn-primary">Gem ny adgangskode</button></div>
+    </form>
+</section>
+
+<section class="card card--narrow">
+    <div class="card-head"><h2>{{ icon('mic') }} Præferencer på denne enhed</h2></div>
+    <div class="stack">
+        <div class="form-group">
+            <label for="voice-pref">Min stemme</label>
+            <input type="text" id="voice-pref" data-voice-input placeholder="F.eks. Sopran, Alt, Tenor 2…">
+            <span class="field-hint">Matcher stemmenavne på sangene — din stemme vises først og vælges automatisk.</span>
+        </div>
+    </div>
+</section>
+{% endblock %}
