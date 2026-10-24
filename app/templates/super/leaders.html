@@ -18,6 +18,7 @@
 </div>
 
 {% if rows %}
+<p class="muted">Fordelt til korledere: {{ allocated }} af {{ max_quota }} · ledigt: {{ free_quota }}. Korledere uden egen kvote deler det ledige.</p>
 <section class="card">
     <div class="table-wrap">
     <table class="table table--stack">
@@ -41,7 +42,7 @@
                 <td data-label="Plads" class="muted">
                     {{ r.storage }} af {{ r.quota }}
                     <form method="post" action="/super/leaders/{{ a.id }}/quota" class="inline-form mt-1" id="quota-{{ a.id }}" hidden>
-                        <input type="text" name="quota" value="{{ r.quota_input }}" placeholder="fx 500M (tom = {{ max_quota }})" maxlength="20" size="14">
+                        <input type="text" name="quota" value="{{ r.quota_input }}" placeholder="fx 500M (tom = del af resten)" maxlength="20" size="14">
                         <button type="submit" class="btn btn-sm btn-primary">Gem</button>
                     </form>
                 </td>

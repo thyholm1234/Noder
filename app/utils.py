@@ -65,11 +65,22 @@ def check_quota(extra_bytes: int = 0) -> bool:
     return (usage["total_bytes"] + extra_bytes) > QUOTA_BYTES
 
 
-def leader_quota(admin) -> int:
-    """A choir leader's quota: their own limit, capped by (and defaulting to) QUOTA from .env."""
-    if admin.quota_bytes is None:
-        return QUOTA_BYTES
-    return min(admin.quota_bytes, QUOTA_BYTES)
+async def allocated_quota(db, exclude_id: int | None = None) -> int:
+    """Sum of the quotas handed out to choir leaders (leaders without one share what is left of QUOTA)."""
+    from sqlalchemy import select, func
+    from app.models import Admin
+
+    q = select(func.coalesce(func.sum(Admin.quota_bytes), 0))
+    if exclude_id is not None:
+        q = q.where(Admin.id != exclude_id)
+    return int(await db.scalar(q))
+
+
+async def leader_quota(db, admin) -> int:
+    """A choir leader's quota: their own limit, or else whatever of QUOTA (.env) is not handed out."""
+    if admin.quota_bytes is not None:
+        return min(admin.quota_bytes, QUOTA_BYTES)
+    return max(QUOTA_BYTES - await allocated_quota(db), 0)
 
 
 async def leader_usage(db, admin_id: int) -> dict[str, int]:
@@ -92,7 +103,7 @@ async def leader_usage(db, admin_id: int) -> dict[str, int]:
 async def leader_storage(db, admin) -> dict:
     """Same shape as get_storage_usage(), but for one choir leader and their own quota."""
     used = await leader_usage(db, admin.id)
-    total, quota = sum(used.values()), leader_quota(admin)
+    total, quota = sum(used.values()), await leader_quota(db, admin)
     return {
         "pdf_display": _fmt(used["pdf"]),
         "audio_display": _fmt(used["audio"]),

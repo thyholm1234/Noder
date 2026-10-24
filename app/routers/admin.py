@@ -29,7 +29,7 @@ def go(url: str):
 async def _quota_room(db: AsyncSession, request: Request) -> int:
     """Bytes the logged-in choir leader can still upload within their own quota."""
     leader = await db.get(Admin, admin_id(request))
-    return max(leader_quota(leader) - sum((await leader_usage(db, leader.id)).values()), 0)
+    return max(await leader_quota(db, leader) - sum((await leader_usage(db, leader.id)).values()), 0)
 
 
 def parse_date(value: str) -> date | None:

@@ -161,6 +161,8 @@ async def require_admin(request: Request):
 async def require_superadmin(request: Request):
     if request.session.get("role") != "superadmin":
         raise LoginRequired
+    from app.utils import get_storage_usage
+    request.state.storage = get_storage_usage()  # sidebar widget: whole server
 
 
 async def load_member(request: Request, db: AsyncSession):

@@ -59,7 +59,7 @@
             </nav>
             <div class="sheet-backdrop" data-toggle-class="sidebar--open" data-target="#sidebar"></div>
             <div class="sidebar-footer">
-                {% if role == 'admin' and request.state.storage %}
+                {% if role in ('admin', 'superadmin') and request.state.storage %}
                 {% set storage = request.state.storage %}
                 <div class="storage-widget" title="PDF: {{ storage.pdf_display }} · Lyd: {{ storage.audio_display }}">
                     <div class="storage-label">{{ icon('database', 14) }} Lagerplads <span>{{ storage.pct }}%</span></div>

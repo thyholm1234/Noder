@@ -11,7 +11,7 @@ from app.config import ADMIN_USERNAME, QUOTA_BYTES, _parse_quota
 from app.database import get_db
 from app.models import Admin, Choir, User, Song, SongFile
 from app.templating import render
-from app.utils import remove_stored_file, leader_quota, _fmt
+from app.utils import remove_stored_file, allocated_quota, _fmt
 
 router = APIRouter()
 
@@ -63,10 +63,11 @@ async def leaders(request: Request, db: AsyncSession = Depends(get_db)):
         except OSError:
             pass
 
+    pool = max(QUOTA_BYTES - await allocated_quota(db), 0)
     rows = [{"admin": a, "choirs": choirs.get(a.id, 0), "members": members.get(a.id, 0),
-             "songs": songs.get(a.id, 0), "storage": _fmt(used.get(a.id, 0)), "quota": _fmt(leader_quota(a)),
+             "songs": songs.get(a.id, 0), "storage": _fmt(used.get(a.id, 0)), "quota": _fmt(min(a.quota_bytes, QUOTA_BYTES) if a.quota_bytes is not None else pool),
              "quota_input": _fmt_input(a.quota_bytes)} for a in admins]
-    return render(request, "super/leaders.html", rows=rows, max_quota=_fmt(QUOTA_BYTES))
+    return render(request, "super/leaders.html", rows=rows, max_quota=_fmt(QUOTA_BYTES), free_quota=_fmt(pool), allocated=_fmt(QUOTA_BYTES - pool))
 
 
 @router.post("/leaders")
@@ -127,12 +128,14 @@ async def leader_quota_set(request: Request, admin_id: int, quota: str = Form(""
         except (ValueError, IndexError):
             flash(request, 'Ugyldig kvote — skriv fx "500M" eller "2G"', "error")
             return go("/super/")
-        if new <= 0 or new > QUOTA_BYTES:
-            flash(request, f"Kvoten skal være mellem 1 B og den samlede kvote på {_fmt(QUOTA_BYTES)}", "error")
+        free = QUOTA_BYTES - await allocated_quota(db, exclude_id=admin_id)
+        if new <= 0 or new > free:
+            flash(request, f"Kvoten skal være mellem 1 B og {_fmt(max(free, 0))} — det er hvad der er tilbage af den "
+                           f"samlede kvote på {_fmt(QUOTA_BYTES)} efter de andre korlederes kvoter", "error")
             return go("/super/")
     leader.quota_bytes = new
     await db.commit()
-    flash(request, f'Kvote for "{leader.username}": {_fmt(new) if new else "ingen grænse ud over " + _fmt(QUOTA_BYTES)}')
+    flash(request, f'Kvote for "{leader.username}": {_fmt(new) if new else "resten af den samlede kvote"}')
     return go("/super/")
 
 
