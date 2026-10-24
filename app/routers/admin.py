@@ -1,3 +1,4 @@
+import os
 import re
 from datetime import date
 from typing import Optional
@@ -15,13 +16,20 @@ from app.auth import admin_required, admin_id, flash, hash_password, generate_pa
 from app.services import (load_setlist, setlist_sort_key, setlist_parts, export_setlist_response, next_event)
 from app.templating import render
 from app.utils import (save_upload, serve_file_with_range, detect_file_type, part_name_from_filename,
-                       safe_external_url, remove_stored_file, download_name, UploadError)
+                       safe_external_url, remove_stored_file, download_name, UploadError,
+                       leader_quota, leader_usage)
 
 router = APIRouter()
 
 
 def go(url: str):
     return RedirectResponse(url, status_code=303)
+
+
+async def _quota_room(db: AsyncSession, request: Request) -> int:
+    """Bytes the logged-in choir leader can still upload within their own quota."""
+    leader = await db.get(Admin, admin_id(request))
+    return max(leader_quota(leader) - sum((await leader_usage(db, leader.id)).values()), 0)
 
 
 def parse_date(value: str) -> date | None:
@@ -560,6 +568,7 @@ async def song_upload_file(
         flash(request, "Ingen fil valgt", "error")
         return go(f"/admin/songs/{song_id}")
 
+    room = await _quota_room(db, request)
     saved, errors = [], []
     for up in uploads:
         kind = detect_file_type(up.filename) if file_type == "auto" else file_type
@@ -567,10 +576,11 @@ async def song_upload_file(
             errors.append(f"{up.filename}: filtypen understøttes ikke")
             continue
         try:
-            path = await save_upload(up, kind)
+            path = await save_upload(up, kind, room)
         except UploadError as e:
             errors.append(f"{up.filename}: {e}")
             continue
+        room -= os.path.getsize(path)
         name = part_name.strip() if (part_name.strip() and len(uploads) == 1) else part_name_from_filename(up.filename)
         db.add(SongFile(song_id=song_id, file_type=kind, part_name=name or None,
                         file_path=path, original_filename=up.filename[:255]))
@@ -731,7 +741,8 @@ async def file_edit(
     old_path = None
     if file and file.filename:
         try:
-            new_path = await save_upload(file, sf.file_type)
+            room = await _quota_room(db, request) + (os.path.getsize(sf.file_path) if os.path.isfile(sf.file_path) else 0)
+            new_path = await save_upload(file, sf.file_type, room)
         except UploadError as e:
             flash(request, f"Fejl ved upload: {e}", "error")
             return go(f"/admin/songs/{sf.song_id}#files")

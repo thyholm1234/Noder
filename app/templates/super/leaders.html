@@ -22,7 +22,7 @@
     <div class="table-wrap">
     <table class="table table--stack">
         <thead>
-            <tr><th>Korleder</th><th>Kor</th><th>Medlemmer</th><th>Sange</th><th>Fyldt</th><th>Sidst logget ind</th><th></th></tr>
+            <tr><th>Korleder</th><th>Kor</th><th>Medlemmer</th><th>Sange</th><th>Plads</th><th>Sidst logget ind</th><th></th></tr>
         </thead>
         <tbody>
             {% for r in rows %}
@@ -38,10 +38,17 @@
                 <td data-label="Kor">{{ r.choirs }}</td>
                 <td data-label="Medlemmer">{{ r.members }}</td>
                 <td data-label="Sange">{{ r.songs }}</td>
-                <td data-label="Fyldt" class="muted">{{ r.storage }}</td>
+                <td data-label="Plads" class="muted">
+                    {{ r.storage }} af {{ r.quota }}
+                    <form method="post" action="/super/leaders/{{ a.id }}/quota" class="inline-form mt-1" id="quota-{{ a.id }}" hidden>
+                        <input type="text" name="quota" value="{{ r.quota_input }}" placeholder="fx 500M (tom = {{ max_quota }})" maxlength="20" size="14">
+                        <button type="submit" class="btn btn-sm btn-primary">Gem</button>
+                    </form>
+                </td>
                 <td data-label="Sidst logget ind" class="muted">{{ a.last_login.strftime('%d/%m/%Y %H:%M') if a.last_login else 'Aldrig' }}</td>
                 <td class="actions">
                     <button type="button" class="btn btn-sm btn-ghost" data-toggle="#rename-{{ a.id }}" title="Omdøb">{{ icon('edit', 14) }}</button>
+                    <button type="button" class="btn btn-sm btn-ghost" data-toggle="#quota-{{ a.id }}" title="Sæt kvote">{{ icon('database', 14) }}</button>
                     <form method="post" action="/super/leaders/{{ a.id }}/reset-password" class="inline"
                           data-confirm="Lav en ny adgangskode til “{{ a.username }}”? Den gamle holder op med at virke." data-confirm-ok="Ny adgangskode">
                         <button type="submit" class="btn btn-sm" title="Ny adgangskode">{{ icon('key', 14) }} Ny kode</button>

@@ -34,6 +34,7 @@ _MIGRATIONS = [
     # Multiple choir leaders: choirs and songs belong to one (admins table is made by create_all)
     "ALTER TABLE choirs ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES admins(id) ON DELETE CASCADE",
     "ALTER TABLE songs ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES admins(id) ON DELETE CASCADE",
+    "ALTER TABLE admins ADD COLUMN IF NOT EXISTS quota_bytes BIGINT",
     "ALTER TABLE choirs DROP CONSTRAINT IF EXISTS choirs_name_key",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_choirs_owner_name ON choirs (owner_id, name)",
 ]

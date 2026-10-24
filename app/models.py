@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Date, ForeignKey, UniqueConstraint, func
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, ForeignKey, UniqueConstraint, func
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -12,6 +12,7 @@ class Admin(Base):
     password = Column(String(255), nullable=False)  # scrypt hash, see app.auth
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True)
+    quota_bytes = Column(BigInteger, nullable=True)  # NULL = the full QUOTA from .env; never above it
 
     choirs = relationship("Choir", back_populates="owner", cascade="all, delete-orphan", passive_deletes=True)
     songs = relationship("Song", back_populates="owner", cascade="all, delete-orphan", passive_deletes=True)

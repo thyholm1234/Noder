@@ -65,6 +65,45 @@ def check_quota(extra_bytes: int = 0) -> bool:
     return (usage["total_bytes"] + extra_bytes) > QUOTA_BYTES
 
 
+def leader_quota(admin) -> int:
+    """A choir leader's quota: their own limit, capped by (and defaulting to) QUOTA from .env."""
+    if admin.quota_bytes is None:
+        return QUOTA_BYTES
+    return min(admin.quota_bytes, QUOTA_BYTES)
+
+
+async def leader_usage(db, admin_id: int) -> dict[str, int]:
+    """Bytes used by one choir leader's uploads, split by file type."""
+    from sqlalchemy import select
+    from app.models import Song, SongFile
+
+    used = {"pdf": 0, "audio": 0}
+    rows = await db.execute(
+        select(SongFile.file_type, SongFile.file_path).join(Song, Song.id == SongFile.song_id).where(Song.owner_id == admin_id)
+    )
+    for file_type, path in rows.all():
+        try:
+            used[file_type] = used.get(file_type, 0) + os.path.getsize(path)
+        except OSError:
+            pass
+    return used
+
+
+async def leader_storage(db, admin) -> dict:
+    """Same shape as get_storage_usage(), but for one choir leader and their own quota."""
+    used = await leader_usage(db, admin.id)
+    total, quota = sum(used.values()), leader_quota(admin)
+    return {
+        "pdf_display": _fmt(used["pdf"]),
+        "audio_display": _fmt(used["audio"]),
+        "total_bytes": total,
+        "total_display": _fmt(total),
+        "quota_bytes": quota,
+        "quota_display": _fmt(quota),
+        "pct": min(round(total / quota * 100, 1), 100) if quota else 100,
+    }
+
+
 def detect_file_type(filename: str) -> str | None:
     """Guess 'pdf' / 'audio' from the file extension, or None if unsupported."""
     ext = os.path.splitext(filename or "")[1].lower()
@@ -139,13 +178,24 @@ async def _stream_to_disk(upload_file, path: str) -> int:
     return size
 
 
-async def save_upload(upload_file, file_type: str) -> str:
-    """Validate and save an uploaded file. Audio is converted to MP3 via FFmpeg."""
+async def save_upload(upload_file, file_type: str, room: int | None = None) -> str:
+    """Validate and save an uploaded file. Audio is converted to MP3 via FFmpeg.
+
+    room: bytes left in the uploading choir leader's own quota (None = only the global quota applies).
+    """
+    path = await _save_upload(upload_file, file_type, room)
+    if room is not None and os.path.getsize(path) > room:
+        remove_stored_file(path)
+        raise UploadError("Ikke nok plads i din kvote — slet filer eller bed om mere plads")
+    return path
+
+
+async def _save_upload(upload_file, file_type: str, room: int | None) -> str:
     if file_type not in ("pdf", "audio"):
         raise UploadError("Ukendt filtype")
 
     size_hint = getattr(upload_file, "size", None)
-    if size_hint is not None and check_quota(size_hint):
+    if size_hint is not None and (check_quota(size_hint) or (room is not None and size_hint > room)):
         raise UploadError("Ikke nok plads — slet filer eller forhøj kvoten")
 
     if file_type == "pdf":

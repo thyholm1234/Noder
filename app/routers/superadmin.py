@@ -7,13 +7,23 @@ from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import flash, hash_password, generate_password
-from app.config import ADMIN_USERNAME
+from app.config import ADMIN_USERNAME, QUOTA_BYTES, _parse_quota
 from app.database import get_db
 from app.models import Admin, Choir, User, Song, SongFile
 from app.templating import render
-from app.utils import remove_stored_file, _fmt
+from app.utils import remove_stored_file, leader_quota, _fmt
 
 router = APIRouter()
+
+
+def _fmt_input(b: int | None) -> str:
+    """Quota as typed in the form (e.g. '500M'); empty = default."""
+    if b is None:
+        return ""
+    for suffix, size in (("T", 1024**4), ("G", 1024**3), ("M", 1024**2), ("K", 1024)):
+        if b % size == 0:
+            return f"{b // size}{suffix}"
+    return str(b)
 
 
 def go(url: str):
@@ -54,8 +64,9 @@ async def leaders(request: Request, db: AsyncSession = Depends(get_db)):
             pass
 
     rows = [{"admin": a, "choirs": choirs.get(a.id, 0), "members": members.get(a.id, 0),
-             "songs": songs.get(a.id, 0), "storage": _fmt(used.get(a.id, 0))} for a in admins]
-    return render(request, "super/leaders.html", rows=rows)
+             "songs": songs.get(a.id, 0), "storage": _fmt(used.get(a.id, 0)), "quota": _fmt(leader_quota(a)),
+             "quota_input": _fmt_input(a.quota_bytes)} for a in admins]
+    return render(request, "super/leaders.html", rows=rows, max_quota=_fmt(QUOTA_BYTES))
 
 
 @router.post("/leaders")
@@ -99,6 +110,29 @@ async def leader_reset_password(request: Request, admin_id: int, password: str =
     await db.commit()
     flash(request, f'Ny adgangskode til "{leader.username}" — vises kun denne ene gang.', "secret",
           credentials=[{"username": leader.username, "password": pw}])
+    return go("/super/")
+
+
+@router.post("/leaders/{admin_id}/quota")
+async def leader_quota_set(request: Request, admin_id: int, quota: str = Form(""), db: AsyncSession = Depends(get_db)):
+    """Set a leader's storage limit within the QUOTA from .env. Empty = the full QUOTA."""
+    leader = await db.get(Admin, admin_id)
+    if not leader:
+        return go("/super/")
+    value = quota.strip()
+    new = None
+    if value:
+        try:
+            new = _parse_quota(value)
+        except (ValueError, IndexError):
+            flash(request, 'Ugyldig kvote — skriv fx "500M" eller "2G"', "error")
+            return go("/super/")
+        if new <= 0 or new > QUOTA_BYTES:
+            flash(request, f"Kvoten skal være mellem 1 B og den samlede kvote på {_fmt(QUOTA_BYTES)}", "error")
+            return go("/super/")
+    leader.quota_bytes = new
+    await db.commit()
+    flash(request, f'Kvote for "{leader.username}": {_fmt(new) if new else "ingen grænse ud over " + _fmt(QUOTA_BYTES)}')
     return go("/super/")
 
 

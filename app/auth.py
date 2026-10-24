@@ -146,13 +146,16 @@ async def require_admin(request: Request):
     """Router dependency: the session must belong to a choir leader that still exists."""
     from app.database import async_session
     from app.models import Admin
+    from app.utils import leader_storage
 
     if request.session.get("role") != "admin" or not request.session.get("admin_id"):
         raise LoginRequired
     async with async_session() as db:
-        if not await db.scalar(select(Admin.id).where(Admin.id == request.session["admin_id"])):
+        leader = await db.get(Admin, request.session["admin_id"])
+        if not leader:
             request.session.clear()
             raise LoginRequired
+        request.state.storage = await leader_storage(db, leader)  # sidebar widget
 
 
 async def require_superadmin(request: Request):
