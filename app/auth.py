@@ -126,10 +126,37 @@ async def verify_csrf(request: Request):
 # ---------------------------------------------------------------------------
 # Access guards & flash messages
 # ---------------------------------------------------------------------------
+class LoginRequired(Exception):
+    """Raised by role dependencies; main.py turns it into a redirect to /login."""
+
+
 def admin_required(request: Request):
-    if request.session.get("role") != "admin":
+    """Choir-leader guard used by the handlers (the router dependency has already validated the session)."""
+    if request.session.get("role") != "admin" or not request.session.get("admin_id"):
         return RedirectResponse("/login", status_code=303)
     return None
+
+
+def admin_id(request: Request) -> int:
+    return request.session["admin_id"]
+
+
+async def require_admin(request: Request):
+    """Router dependency: the session must belong to a choir leader that still exists."""
+    from app.database import async_session
+    from app.models import Admin
+
+    if request.session.get("role") != "admin" or not request.session.get("admin_id"):
+        raise LoginRequired
+    async with async_session() as db:
+        if not await db.scalar(select(Admin.id).where(Admin.id == request.session["admin_id"])):
+            request.session.clear()
+            raise LoginRequired
+
+
+async def require_superadmin(request: Request):
+    if request.session.get("role") != "superadmin":
+        raise LoginRequired
 
 
 async def load_member(request: Request, db: AsyncSession):

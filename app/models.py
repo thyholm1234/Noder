@@ -3,13 +3,31 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
+class Admin(Base):
+    """A choir leader (korleder). Owns choirs and songs; managed by the superadmin."""
+    __tablename__ = "admins"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), nullable=False, unique=True)
+    password = Column(String(255), nullable=False)  # scrypt hash, see app.auth
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_login = Column(DateTime(timezone=True), nullable=True)
+
+    choirs = relationship("Choir", back_populates="owner", cascade="all, delete-orphan", passive_deletes=True)
+    songs = relationship("Song", back_populates="owner", cascade="all, delete-orphan", passive_deletes=True)
+
+
 class Choir(Base):
     __tablename__ = "choirs"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String(255), nullable=False, unique=True)
+    name = Column(String(255), nullable=False)
+    owner_id = Column(Integer, ForeignKey("admins.id", ondelete="CASCADE"), nullable=True)  # NULL only before migration
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_choirs_owner_name"),)
+
+    owner = relationship("Admin", back_populates="choirs")
     users = relationship("User", back_populates="choir", cascade="all, delete-orphan")
     choir_songs = relationship("ChoirSong", back_populates="choir", cascade="all, delete-orphan")
     setlists = relationship("Setlist", back_populates="choir", cascade="all, delete-orphan")
@@ -36,8 +54,10 @@ class Song(Base):
     composer = Column(String(255), nullable=True)
     tags = Column(String(500), nullable=True)
     description = Column(Text, nullable=True)
+    owner_id = Column(Integer, ForeignKey("admins.id", ondelete="CASCADE"), nullable=True)  # NULL only before migration
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    owner = relationship("Admin", back_populates="songs")
     files = relationship("SongFile", back_populates="song", cascade="all, delete-orphan")
     choir_songs = relationship("ChoirSong", back_populates="song", cascade="all, delete-orphan")
     links = relationship("SongLink", back_populates="song", cascade="all, delete-orphan")

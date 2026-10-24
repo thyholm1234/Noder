@@ -39,6 +39,10 @@
                 <a href="/admin/songs" class="nav-link {% if active == 'songs' %}active{% endif %}">
                     {{ icon('music') }} Sange
                 </a>
+                {% elif role == 'superadmin' %}
+                <a href="/super/" class="nav-link {% if active == 'leaders' %}active{% endif %}">
+                    {{ icon('users') }} Korledere
+                </a>
                 {% elif role == 'user' %}
                 <a href="/user/dashboard" class="nav-link {% if active == 'dashboard' %}active{% endif %}">
                     {{ icon('music') }} Mine sange
@@ -72,7 +76,9 @@
                     {% if role == 'user' %}
                     <a href="/user/account" class="sidebar-pill">{{ icon('user', 16) }} <span class="truncate">{{ request.session.get('display_name', '') }}</span></a>
                     {% elif role == 'admin' %}
-                    <div class="sidebar-pill">{{ icon('shield', 16) }} Administrator</div>
+                    <div class="sidebar-pill">{{ icon('shield', 16) }} <span class="truncate">{{ request.session.get('display_name') or 'Korleder' }}</span></div>
+                    {% elif role == 'superadmin' %}
+                    <div class="sidebar-pill">{{ icon('shield', 16) }} Superadmin</div>
                     {% endif %}
                     <div class="sidebar-row">
                         <button type="button" class="sidebar-pill sidebar-pill--icon" data-theme-toggle title="Skift lyst/mørkt tema" aria-label="Skift tema">

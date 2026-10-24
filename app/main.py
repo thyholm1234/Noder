@@ -10,10 +10,10 @@ from sqlalchemy import select, func
 
 from app.config import SECRET_KEY, SESSION_HTTPS_ONLY, SESSION_MAX_AGE
 from app.database import init_db, async_session
-from app.models import User
+from app.models import User, Admin
 from app.auth import (verify_admin, verify_password, verify_csrf, login_blocked,
-                      register_failure, clear_failures)
-from app.routers import admin, user
+                      register_failure, clear_failures, require_admin, require_superadmin, LoginRequired)
+from app.routers import admin, user, superadmin
 from app.templating import render, templates, asset, ASSET_VERSION, PRECACHE
 
 
@@ -62,8 +62,16 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-app.include_router(admin.router, prefix="/admin", dependencies=[Depends(verify_csrf)])
+app.include_router(admin.router, prefix="/admin", dependencies=[Depends(verify_csrf), Depends(require_admin)])
+app.include_router(superadmin.router, prefix="/super", dependencies=[Depends(verify_csrf), Depends(require_superadmin)])
 app.include_router(user.router, prefix="/user", dependencies=[Depends(verify_csrf)])
+
+
+@app.exception_handler(LoginRequired)
+async def login_required(request: Request, exc: LoginRequired):
+    if "text/html" not in request.headers.get("accept", ""):
+        return JSONResponse({"detail": "Log ind igen"}, status_code=401)
+    return RedirectResponse("/login", status_code=303)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -78,6 +86,8 @@ async def root(request: Request):
     role = request.session.get("role")
     if role == "admin":
         return RedirectResponse("/admin/dashboard", status_code=303)
+    elif role == "superadmin":
+        return RedirectResponse("/super/", status_code=303)
     elif role == "user":
         return RedirectResponse("/user/dashboard", status_code=303)
     return RedirectResponse("/login", status_code=303)
@@ -140,7 +150,7 @@ async def offline(request: Request):
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    if request.session.get("role") in ("admin", "user"):
+    if request.session.get("role") in ("admin", "superadmin", "user"):
         return RedirectResponse("/", status_code=303)
     return render(request, "login.html", error=None, username="")
 
@@ -155,13 +165,31 @@ async def login(request: Request, username: str = Form(...), password: str = For
         return render(request, "login.html", username=username,
                       error=f"For mange forsøg. Prøv igen om {minutes} min.")
 
-    if verify_admin(username, password):
-        clear_failures(request, username)
-        request.session.clear()  # new session on privilege change
-        request.session["role"] = "admin"
-        return RedirectResponse("/admin/dashboard", status_code=303)
-
     async with async_session() as db:
+        # Superadmin first: if a leader happens to share its name (e.g. a legacy admin migrated from .env),
+        # the superadmin can still get in and rename or reset that leader
+        if verify_admin(username, password):
+            clear_failures(request, username)
+            request.session.clear()
+            request.session["role"] = "superadmin"
+            request.session["display_name"] = username
+            return RedirectResponse("/super/", status_code=303)
+
+        leader = await db.scalar(
+            select(Admin)
+            .where(func.lower(Admin.username) == username.lower())
+            .order_by((Admin.username == username).desc())
+        )
+        if leader and verify_password(password, leader.password):
+            clear_failures(request, username)
+            leader.last_login = datetime.now(timezone.utc)
+            await db.commit()
+            request.session.clear()  # new session on privilege change
+            request.session["role"] = "admin"
+            request.session["admin_id"] = leader.id
+            request.session["display_name"] = leader.username
+            return RedirectResponse("/admin/dashboard", status_code=303)
+
         db_user = await db.scalar(
             select(User)
             .where(func.lower(User.username) == username.lower())

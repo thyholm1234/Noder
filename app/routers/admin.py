@@ -8,9 +8,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import ADMIN_USERNAME
 from app.database import get_db
-from app.models import Choir, User, Song, SongFile, ChoirSong, Setlist, SetlistItem, SongLink
-from app.auth import admin_required, flash, hash_password, generate_password
+from app.models import Admin, Choir, User, Song, SongFile, ChoirSong, Setlist, SetlistItem, SongLink
+from app.auth import admin_required, admin_id, flash, hash_password, generate_password
 from app.services import (load_setlist, setlist_sort_key, setlist_parts, export_setlist_response, next_event)
 from app.templating import render
 from app.utils import (save_upload, serve_file_with_range, detect_file_type, part_name_from_filename,
@@ -39,7 +40,50 @@ def clean_tags(value: str) -> str | None:
     return ", ".join(tags)[:500] or None
 
 
-async def _choir_setlist(db: AsyncSession, choir_id: int, setlist_id: int) -> Setlist:
+# --- Ownership: a choir leader only ever sees and touches their own choirs, songs and members ---
+async def own_choir(db: AsyncSession, request: Request, choir_id: int) -> Choir | None:
+    return await db.scalar(select(Choir).where(Choir.id == choir_id, Choir.owner_id == admin_id(request)))
+
+
+async def own_song(db: AsyncSession, request: Request, song_id: int) -> Song | None:
+    return await db.scalar(select(Song).where(Song.id == song_id, Song.owner_id == admin_id(request)))
+
+
+async def own_user(db: AsyncSession, request: Request, user_id: int) -> User | None:
+    return await db.scalar(
+        select(User).join(Choir, Choir.id == User.choir_id).where(User.id == user_id, Choir.owner_id == admin_id(request))
+    )
+
+
+async def own_file(db: AsyncSession, request: Request, file_id: int) -> SongFile | None:
+    return await db.scalar(
+        select(SongFile).join(Song, Song.id == SongFile.song_id).where(SongFile.id == file_id, Song.owner_id == admin_id(request))
+    )
+
+
+async def own_song_ids(db: AsyncSession, request: Request, ids) -> set[int]:
+    if not ids:
+        return set()
+    return set((await db.execute(select(Song.id).where(Song.id.in_(ids), Song.owner_id == admin_id(request)))).scalars())
+
+
+async def own_choir_ids(db: AsyncSession, request: Request, ids) -> set[int]:
+    if not ids:
+        return set()
+    return set((await db.execute(select(Choir.id).where(Choir.id.in_(ids), Choir.owner_id == admin_id(request)))).scalars())
+
+
+async def taken_usernames(db: AsyncSession) -> set[str]:
+    """Login names that can't be given to a member: other members, choir leaders and the superadmin."""
+    names = set((await db.execute(select(func.lower(User.username)))).scalars())
+    names |= set((await db.execute(select(func.lower(Admin.username)))).scalars())
+    names.add(ADMIN_USERNAME.lower())
+    return names
+
+
+async def _choir_setlist(db: AsyncSession, request: Request, choir_id: int, setlist_id: int) -> Setlist:
+    if not await own_choir(db, request, choir_id):
+        raise HTTPException(404, "Koret findes ikke")
     setlist = await db.scalar(select(Setlist).where(Setlist.id == setlist_id, Setlist.choir_id == choir_id))
     if not setlist:
         raise HTTPException(404, "Setlisten findes ikke")
@@ -73,17 +117,21 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     if redirect := admin_required(request):
         return redirect
 
-    choir_count = await db.scalar(select(func.count(Choir.id)))
-    user_count = await db.scalar(select(func.count(User.id)))
-    song_count = await db.scalar(select(func.count(Song.id)))
-    setlist_count = await db.scalar(select(func.count(Setlist.id)))
+    me = admin_id(request)
+    choir_count = await db.scalar(select(func.count(Choir.id)).where(Choir.owner_id == me))
+    user_count = await db.scalar(select(func.count(User.id)).join(Choir, Choir.id == User.choir_id).where(Choir.owner_id == me))
+    song_count = await db.scalar(select(func.count(Song.id)).where(Song.owner_id == me))
+    setlist_count = await db.scalar(
+        select(func.count(Setlist.id)).join(Choir, Choir.id == Setlist.choir_id).where(Choir.owner_id == me))
 
-    recent_songs = (await db.execute(select(Song).order_by(Song.created_at.desc()).limit(5))).scalars().all()
+    recent_songs = (await db.execute(
+        select(Song).where(Song.owner_id == me).order_by(Song.created_at.desc()).limit(5))).scalars().all()
 
     upcoming = (await db.execute(
         select(Setlist)
+        .join(Choir, Choir.id == Setlist.choir_id)
         .options(selectinload(Setlist.choir), selectinload(Setlist.items))
-        .where(Setlist.event_date >= date.today())
+        .where(Choir.owner_id == me, Setlist.event_date >= date.today())
         .order_by(Setlist.event_date)
         .limit(6)
     )).scalars().all()
@@ -92,7 +140,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     has_pdf = select(SongFile.song_id).where(SongFile.file_type == "pdf")
     missing_pdf = (await db.execute(
         select(Song)
-        .where(Song.id.notin_(has_pdf), Song.id.in_(select(ChoirSong.song_id)))
+        .where(Song.owner_id == me, Song.id.notin_(has_pdf), Song.id.in_(select(ChoirSong.song_id)))
         .order_by(Song.title)
         .limit(8)
     )).scalars().all()
@@ -115,6 +163,7 @@ async def choirs_list(request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Choir)
         .options(selectinload(Choir.users), selectinload(Choir.choir_songs), selectinload(Choir.setlists))
+        .where(Choir.owner_id == admin_id(request))
         .order_by(Choir.name)
     )
     return render(request, "admin/choirs.html", choirs=result.scalars().all())
@@ -129,7 +178,7 @@ async def choir_create(request: Request, name: str = Form(...), db: AsyncSession
     if not name:
         flash(request, "Koret skal have et navn", "error")
         return go("/admin/choirs")
-    choir = Choir(name=name)
+    choir = Choir(name=name, owner_id=admin_id(request))
     db.add(choir)
     try:
         await db.commit()
@@ -154,14 +203,15 @@ async def choir_detail(request: Request, choir_id: int, db: AsyncSession = Depen
             selectinload(Choir.setlists).selectinload(Setlist.items).selectinload(SetlistItem.song)
             .selectinload(Song.files),
         )
-        .where(Choir.id == choir_id)
+        .where(Choir.id == choir_id, Choir.owner_id == admin_id(request))
     )
     choir = result.scalar_one_or_none()
     if not choir:
         return go("/admin/choirs")
 
     assigned_ids = {cs.song_id for cs in choir.choir_songs}
-    all_songs = (await db.execute(select(Song).order_by(Song.title))).scalars().all()
+    all_songs = (await db.execute(
+        select(Song).where(Song.owner_id == admin_id(request)).order_by(Song.title))).scalars().all()
     available_songs = [s for s in all_songs if s.id not in assigned_ids]
     assigned_songs = sorted((cs.song for cs in choir.choir_songs), key=lambda s: s.title.lower())
     choir_songs = sorted(choir.choir_songs, key=lambda cs: cs.song.title.lower())
@@ -176,7 +226,8 @@ async def choir_detail(request: Request, choir_id: int, db: AsyncSession = Depen
         assigned_songs=assigned_songs,
         setlists=setlists,
         setlist_pdf_parts={sl.id: setlist_parts(sl, "pdf") for sl in setlists},
-        other_choirs=(await db.execute(select(Choir).where(Choir.id != choir_id).order_by(Choir.name))).scalars().all(),
+        other_choirs=(await db.execute(
+            select(Choir).where(Choir.id != choir_id, Choir.owner_id == admin_id(request)).order_by(Choir.name))).scalars().all(),
     )
 
 
@@ -185,7 +236,7 @@ async def choir_rename(request: Request, choir_id: int, name: str = Form(...), d
     if redirect := admin_required(request):
         return redirect
 
-    choir = await db.get(Choir, choir_id)
+    choir = await own_choir(db, request, choir_id)
     name = name.strip()[:255]
     if choir and name:
         choir.name = name
@@ -203,7 +254,7 @@ async def choir_delete(request: Request, choir_id: int, db: AsyncSession = Depen
     if redirect := admin_required(request):
         return redirect
 
-    await db.execute(delete(Choir).where(Choir.id == choir_id))
+    await db.execute(delete(Choir).where(Choir.id == choir_id, Choir.owner_id == admin_id(request)))
     await db.commit()
     flash(request, "Kor slettet")
     return go("/admin/choirs")
@@ -228,7 +279,7 @@ async def choir_add_user(
     if redirect := admin_required(request):
         return redirect
 
-    if not await db.get(Choir, choir_id):
+    if not await own_choir(db, request, choir_id):
         return go("/admin/choirs")
 
     wanted: list[tuple[str, str]] = []
@@ -239,7 +290,7 @@ async def choir_add_user(
             name, pw = (_SPLIT.split(line.strip(), maxsplit=1) + [""])[:2]
             wanted.append((name.strip(), pw.strip()))
 
-    existing = {u.lower() for u in (await db.execute(select(User.username))).scalars()}
+    existing = await taken_usernames(db)
     created, skipped = [], []
     for name, pw in wanted:
         name = name[:255]
@@ -269,7 +320,7 @@ async def user_reset_password(
     if redirect := admin_required(request):
         return redirect
 
-    user = await db.get(User, user_id)
+    user = await own_user(db, request, user_id)
     if not user:
         return go("/admin/choirs")
     pw = password.strip() or generate_password()
@@ -285,11 +336,12 @@ async def user_rename(request: Request, user_id: int, username: str = Form(...),
     if redirect := admin_required(request):
         return redirect
 
-    user = await db.get(User, user_id)
+    user = await own_user(db, request, user_id)
     if not user:
         return go("/admin/choirs")
     new = username.strip()[:255]
-    clash = await db.scalar(select(User.id).where(func.lower(User.username) == new.lower(), User.id != user_id))
+    clash = new.lower() in (await taken_usernames(db)) - {user.username.lower()} or (
+        await db.scalar(select(User.id).where(func.lower(User.username) == new.lower(), User.id != user_id)))
     if not new or clash:
         flash(request, f'Brugernavnet "{new}" er optaget', "error")
     else:
@@ -304,7 +356,7 @@ async def user_delete(request: Request, user_id: int, db: AsyncSession = Depends
     if redirect := admin_required(request):
         return redirect
 
-    user = await db.get(User, user_id)
+    user = await own_user(db, request, user_id)
     if not user:
         return go("/admin/choirs")
     choir_id = user.choir_id
@@ -322,8 +374,10 @@ async def choir_assign_song(request: Request, choir_id: int, db: AsyncSession = 
     if redirect := admin_required(request):
         return redirect
 
+    if not await own_choir(db, request, choir_id):
+        return go("/admin/choirs")
     form = await request.form()
-    song_ids = {int(v) for v in form.getlist("song_id") if str(v).isdigit()}
+    song_ids = await own_song_ids(db, request, {int(v) for v in form.getlist("song_id") if str(v).isdigit()})
     already = set((await db.execute(select(ChoirSong.song_id).where(ChoirSong.choir_id == choir_id))).scalars())
     new_ids = song_ids - already
     for song_id in new_ids:
@@ -339,8 +393,9 @@ async def choir_unassign_song(request: Request, choir_id: int, song_id: int, db:
     if redirect := admin_required(request):
         return redirect
 
-    await _unassign(db, choir_id, song_id)
-    flash(request, "Sang fjernet fra koret")
+    if await own_choir(db, request, choir_id):
+        await _unassign(db, choir_id, song_id)
+        flash(request, "Sang fjernet fra koret")
     return go(f"/admin/choirs/{choir_id}#songs")
 
 
@@ -356,7 +411,9 @@ async def choir_highlight_song(
     if redirect := admin_required(request):
         return redirect
 
-    cs = await db.scalar(select(ChoirSong).where(ChoirSong.choir_id == choir_id, ChoirSong.song_id == song_id))
+    cs = await db.scalar(
+        select(ChoirSong).join(Choir, Choir.id == ChoirSong.choir_id)
+        .where(ChoirSong.choir_id == choir_id, ChoirSong.song_id == song_id, Choir.owner_id == admin_id(request)))
     if not cs:
         return go(f"/admin/choirs/{choir_id}")
 
@@ -390,14 +447,12 @@ async def songs_list(
         return redirect
 
     q = q.strip()
-    filter_clause = None
+    filter_clause = Song.owner_id == admin_id(request)
     if q:
         like = f"%{q}%"
-        filter_clause = Song.title.ilike(like) | Song.composer.ilike(like) | Song.tags.ilike(like)
+        filter_clause = filter_clause & (Song.title.ilike(like) | Song.composer.ilike(like) | Song.tags.ilike(like))
 
-    count_stmt = select(func.count(Song.id))
-    if filter_clause is not None:
-        count_stmt = count_stmt.where(filter_clause)
+    count_stmt = select(func.count(Song.id)).where(filter_clause)
     total = await db.scalar(count_stmt)
     total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
     page = max(1, min(page, total_pages))
@@ -413,8 +468,7 @@ async def songs_list(
         .offset((page - 1) * PER_PAGE)
         .limit(PER_PAGE)
     )
-    if filter_clause is not None:
-        data_stmt = data_stmt.where(filter_clause)
+    data_stmt = data_stmt.where(filter_clause)
 
     songs = (await db.execute(data_stmt)).scalars().all()
 
@@ -439,7 +493,7 @@ async def song_create(
     if not title:
         flash(request, "Sangen skal have en titel", "error")
         return go("/admin/songs")
-    song = Song(title=title, composer=composer.strip()[:255] or None, tags=clean_tags(tags))
+    song = Song(title=title, composer=composer.strip()[:255] or None, tags=clean_tags(tags), owner_id=admin_id(request))
     db.add(song)
     await db.commit()
     flash(request, f'Sang "{title}" oprettet — upload noder og stemmer herunder')
@@ -458,14 +512,15 @@ async def song_detail(request: Request, song_id: int, db: AsyncSession = Depends
             selectinload(Song.choir_songs).selectinload(ChoirSong.choir),
             selectinload(Song.links),
         )
-        .where(Song.id == song_id)
+        .where(Song.id == song_id, Song.owner_id == admin_id(request))
     )
     song = result.scalar_one_or_none()
     if not song:
         return go("/admin/songs")
 
     assigned_ids = {cs.choir_id for cs in song.choir_songs}
-    all_choirs = (await db.execute(select(Choir).order_by(Choir.name))).scalars().all()
+    all_choirs = (await db.execute(
+        select(Choir).where(Choir.owner_id == admin_id(request)).order_by(Choir.name))).scalars().all()
 
     used_in = (await db.execute(
         select(Setlist)
@@ -497,7 +552,7 @@ async def song_upload_file(
     if redirect := admin_required(request):
         return redirect
 
-    if not await db.get(Song, song_id):
+    if not await own_song(db, request, song_id):
         return go("/admin/songs")
 
     uploads = [f for f in file if f.filename]
@@ -544,7 +599,7 @@ async def song_update(
     if redirect := admin_required(request):
         return redirect
 
-    song = await db.get(Song, song_id)
+    song = await own_song(db, request, song_id)
     if song and title.strip():
         song.title = title.strip()[:255]
         song.composer = composer.strip()[:255] or None
@@ -566,6 +621,8 @@ async def song_link_add(
     if redirect := admin_required(request):
         return redirect
 
+    if not await own_song(db, request, song_id):
+        return go("/admin/songs")
     safe = safe_external_url(url)
     if not safe:
         flash(request, "Linket skal starte med http:// eller https://", "error")
@@ -581,6 +638,8 @@ async def song_link_delete(request: Request, song_id: int, link_id: int, db: Asy
     if redirect := admin_required(request):
         return redirect
 
+    if not await own_song(db, request, song_id):
+        return go("/admin/songs")
     await db.execute(delete(SongLink).where(SongLink.id == link_id, SongLink.song_id == song_id))
     await db.commit()
     flash(request, "Link slettet")
@@ -592,8 +651,10 @@ async def song_assign_choir(request: Request, song_id: int, db: AsyncSession = D
     if redirect := admin_required(request):
         return redirect
 
+    if not await own_song(db, request, song_id):
+        return go("/admin/songs")
     form = await request.form()
-    choir_ids = {int(v) for v in form.getlist("choir_id") if str(v).isdigit()}
+    choir_ids = await own_choir_ids(db, request, {int(v) for v in form.getlist("choir_id") if str(v).isdigit()})
     already = set((await db.execute(select(ChoirSong.choir_id).where(ChoirSong.song_id == song_id))).scalars())
     new_ids = choir_ids - already
     for choir_id in new_ids:
@@ -609,8 +670,9 @@ async def song_unassign_choir(request: Request, song_id: int, choir_id: int, db:
     if redirect := admin_required(request):
         return redirect
 
-    await _unassign(db, choir_id, song_id)
-    flash(request, "Kor fjernet fra sang")
+    if await own_song(db, request, song_id) and await own_choir(db, request, choir_id):
+        await _unassign(db, choir_id, song_id)
+        flash(request, "Kor fjernet fra sang")
     return go(f"/admin/songs/{song_id}#choirs")
 
 
@@ -619,6 +681,8 @@ async def song_delete(request: Request, song_id: int, db: AsyncSession = Depends
     if redirect := admin_required(request):
         return redirect
 
+    if not await own_song(db, request, song_id):
+        return go("/admin/songs")
     paths = (await db.execute(select(SongFile.file_path).where(SongFile.song_id == song_id))).scalars().all()
     await db.execute(delete(Song).where(Song.id == song_id))
     await db.commit()
@@ -636,7 +700,7 @@ async def file_delete(request: Request, file_id: int, db: AsyncSession = Depends
     if redirect := admin_required(request):
         return redirect
 
-    sf = await db.get(SongFile, file_id)
+    sf = await own_file(db, request, file_id)
     if not sf:
         return go("/admin/songs")
     song_id, path = sf.song_id, sf.file_path
@@ -658,7 +722,7 @@ async def file_edit(
     if redirect := admin_required(request):
         return redirect
 
-    sf = await db.get(SongFile, file_id)
+    sf = await own_file(db, request, file_id)
     if not sf:
         return go("/admin/songs")
 
@@ -685,7 +749,7 @@ async def file_serve(request: Request, file_id: int, download: int = 0, db: Asyn
     if redirect := admin_required(request):
         return redirect
 
-    sf = await db.get(SongFile, file_id)
+    sf = await own_file(db, request, file_id)
     if not sf:
         raise HTTPException(404, "Fil ikke fundet")
     return await serve_file_with_range(sf.file_path, request, as_download=bool(download),
@@ -707,7 +771,9 @@ async def setlist_create(
         return redirect
 
     name = name.strip()[:255]
-    if not name or not await db.get(Choir, choir_id):
+    if not await own_choir(db, request, choir_id):
+        return go("/admin/choirs")
+    if not name:
         flash(request, "Setlisten skal have et navn", "error")
         return go(f"/admin/choirs/{choir_id}#setlists")
     setlist = Setlist(choir_id=choir_id, name=name, event_date=parse_date(event_date))
@@ -730,7 +796,7 @@ async def setlist_update(
     if redirect := admin_required(request):
         return redirect
 
-    setlist = await _choir_setlist(db, choir_id, setlist_id)
+    setlist = await _choir_setlist(db, request, choir_id, setlist_id)
     if name.strip():
         setlist.name = name.strip()[:255]
     setlist.event_date = parse_date(event_date)
@@ -752,11 +818,13 @@ async def setlist_duplicate(
     if redirect := admin_required(request):
         return redirect
 
+    if not await own_choir(db, request, choir_id):
+        raise HTTPException(404, "Koret findes ikke")
     source = await load_setlist(db, setlist_id, choir_id)
     if not source:
         raise HTTPException(404, "Setlisten findes ikke")
     target = target_choir_id or choir_id
-    if not await db.get(Choir, target):
+    if not await own_choir(db, request, target):
         raise HTTPException(404, "Koret findes ikke")
 
     copy = Setlist(choir_id=target, name=(f"{source.name} (kopi)" if target == choir_id else source.name)[:255],
@@ -782,7 +850,7 @@ async def setlist_add_song(request: Request, choir_id: int, setlist_id: int, db:
     if redirect := admin_required(request):
         return redirect
 
-    await _choir_setlist(db, choir_id, setlist_id)
+    await _choir_setlist(db, request, choir_id, setlist_id)
     form = await request.form()
     song_ids = [int(v) for v in form.getlist("song_id") if str(v).isdigit()]
 
@@ -791,7 +859,7 @@ async def setlist_add_song(request: Request, choir_id: int, setlist_id: int, db:
     pos = await _next_position(db, setlist_id)
     added, auto_assigned = 0, 0
     for song_id in dict.fromkeys(song_ids):
-        if song_id in in_list or not await db.get(Song, song_id):
+        if song_id in in_list or not await own_song(db, request, song_id):
             continue
         if song_id not in assigned:
             db.add(ChoirSong(choir_id=choir_id, song_id=song_id))
@@ -817,7 +885,7 @@ async def setlist_add_placeholder(
     if redirect := admin_required(request):
         return redirect
 
-    await _choir_setlist(db, choir_id, setlist_id)
+    await _choir_setlist(db, request, choir_id, setlist_id)
     db.add(SetlistItem(setlist_id=setlist_id, song_id=None, placeholder_text=title.strip()[:255] or "Pause",
                        position=await _next_position(db, setlist_id)))
     await db.commit()
@@ -833,7 +901,7 @@ async def setlist_rename_placeholder(
     if redirect := admin_required(request):
         return redirect
 
-    await _choir_setlist(db, choir_id, setlist_id)
+    await _choir_setlist(db, request, choir_id, setlist_id)
     await db.execute(
         update(SetlistItem)
         .where(SetlistItem.id == item_id, SetlistItem.setlist_id == setlist_id, SetlistItem.song_id.is_(None))
@@ -850,7 +918,7 @@ async def setlist_remove_item(
     if redirect := admin_required(request):
         return redirect
 
-    await _choir_setlist(db, choir_id, setlist_id)
+    await _choir_setlist(db, request, choir_id, setlist_id)
     await db.execute(delete(SetlistItem).where(SetlistItem.id == item_id, SetlistItem.setlist_id == setlist_id))
     await db.commit()
     flash(request, "Fjernet fra setlisten")
@@ -859,10 +927,7 @@ async def setlist_remove_item(
 
 @router.post("/choirs/{choir_id}/setlists/{setlist_id}/reorder")
 async def setlist_reorder(request: Request, choir_id: int, setlist_id: int, db: AsyncSession = Depends(get_db)):
-    if request.session.get("role") != "admin":
-        raise HTTPException(401, "Log ind igen")
-
-    await _choir_setlist(db, choir_id, setlist_id)
+    await _choir_setlist(db, request, choir_id, setlist_id)
     body = await request.json()
     order = body.get("order", []) if isinstance(body, dict) else []
     try:
@@ -884,6 +949,8 @@ async def setlist_delete(request: Request, choir_id: int, setlist_id: int, db: A
     if redirect := admin_required(request):
         return redirect
 
+    if not await own_choir(db, request, choir_id):
+        return go("/admin/choirs")
     await db.execute(delete(Setlist).where(Setlist.id == setlist_id, Setlist.choir_id == choir_id))
     await db.commit()
     flash(request, "Setliste slettet")
@@ -895,7 +962,9 @@ async def setlist_export(request: Request, choir_id: int, setlist_id: int, db: A
     if redirect := admin_required(request):
         return redirect
 
-    setlist = await load_setlist(db, setlist_id, choir_id, with_files=True)
+    setlist = None
+    if await own_choir(db, request, choir_id):
+        setlist = await load_setlist(db, setlist_id, choir_id, with_files=True)
     if not setlist:
         raise HTTPException(404, "Setlisten findes ikke")
     return await export_setlist_response(setlist, request.query_params)
@@ -909,7 +978,7 @@ async def choir_preview(request: Request, choir_id: int, db: AsyncSession = Depe
     if redirect := admin_required(request):
         return redirect
 
-    choir = await db.get(Choir, choir_id)
+    choir = await own_choir(db, request, choir_id)
     if not choir:
         return go("/admin/choirs")
 

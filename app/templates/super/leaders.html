@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set active = "leaders" %}
+
+{% block title %}Korledere - Noder{% endblock %}
+
+{% block content %}
+<div class="page-header page-header--split">
+    <div>
+        <p class="eyebrow">Superadministration</p>
+        <h1>Korledere</h1>
+    </div>
+    <form method="post" action="/super/leaders" class="inline-form">
+        <input type="text" name="username" placeholder="Brugernavn" required maxlength="255" autocomplete="off">
+        <input type="text" name="password" placeholder="Adgangskode (tom = generér)" autocomplete="off">
+        <button type="submit" class="btn btn-primary">{{ icon('plus', 16) }} Opret korleder</button>
+    </form>
+</div>
+
+{% if rows %}
+<section class="card">
+    <div class="table-wrap">
+    <table class="table table--stack">
+        <thead>
+            <tr><th>Korleder</th><th>Kor</th><th>Medlemmer</th><th>Sange</th><th>Fyldt</th><th>Sidst logget ind</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            {% set a = r.admin %}
+            <tr>
+                <td>
+                    <strong>{{ a.username }}</strong>
+                    <form method="post" action="/super/leaders/{{ a.id }}/rename" class="inline-form mt-1" id="rename-{{ a.id }}" hidden>
+                        <input type="text" name="username" value="{{ a.username }}" required maxlength="255">
+                        <button type="submit" class="btn btn-sm btn-primary">Gem</button>
+                    </form>
+                </td>
+                <td data-label="Kor">{{ r.choirs }}</td>
+                <td data-label="Medlemmer">{{ r.members }}</td>
+                <td data-label="Sange">{{ r.songs }}</td>
+                <td data-label="Fyldt" class="muted">{{ r.storage }}</td>
+                <td data-label="Sidst logget ind" class="muted">{{ a.last_login.strftime('%d/%m/%Y %H:%M') if a.last_login else 'Aldrig' }}</td>
+                <td class="actions">
+                    <button type="button" class="btn btn-sm btn-ghost" data-toggle="#rename-{{ a.id }}" title="Omdøb">{{ icon('edit', 14) }}</button>
+                    <form method="post" action="/super/leaders/{{ a.id }}/reset-password" class="inline"
+                          data-confirm="Lav en ny adgangskode til “{{ a.username }}”? Den gamle holder op med at virke." data-confirm-ok="Ny adgangskode">
+                        <button type="submit" class="btn btn-sm" title="Ny adgangskode">{{ icon('key', 14) }} Ny kode</button>
+                    </form>
+                    <form method="post" action="/super/leaders/{{ a.id }}/delete" class="inline"
+                          data-confirm="Slet korlederen “{{ a.username }}” — og alle deres {{ r.choirs }} kor, {{ r.members }} medlemmer og {{ r.songs }} sange med filer? Det kan ikke fortrydes.">
+                        <button type="submit" class="btn btn-sm btn-ghost btn-danger-ghost" title="Slet">{{ icon('trash', 14) }}</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</section>
+{% else %}
+<div class="empty-state-large card">
+    <div class="empty-icon">{{ icon('users', 48) }}</div>
+    <p>Ingen korledere endnu — opret den første ovenfor.</p>
+</div>
+{% endif %}
+{% endblock %}

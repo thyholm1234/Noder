@@ -10,6 +10,7 @@ log = logging.getLogger("noder")
 _INSECURE_VALUES = {"", "admin123", "skift-mig", "skift-til-en-lang-tilfaeldig-streng",
                     "skift-denne-til-en-tilfaeldig-nogle-i-produktion"}
 
+# Superadmin (manages choir leaders). Choir leaders themselves live in the database.
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://noder:noder_secret_2024@db:5432/noder_db")
@@ -25,7 +26,7 @@ if SECRET_KEY in _INSECURE_VALUES or len(SECRET_KEY) < 16:
 # Default/template passwords are rejected outright; short ones only warn.
 ADMIN_PASSWORD_INSECURE = ADMIN_PASSWORD in _INSECURE_VALUES
 if ADMIN_PASSWORD_INSECURE:
-    log.warning("ADMIN_PASSWORD er ikke sat eller er en standardværdi — admin-login er slået fra.")
+    log.warning("ADMIN_PASSWORD er ikke sat eller er en standardværdi — superadmin-login er slået fra.")
 elif len(ADMIN_PASSWORD) < 10:
     log.warning("ADMIN_PASSWORD er kort — overvej mindst 10 tegn.")
 
