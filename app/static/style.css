@@ -788,13 +788,15 @@ a.tag-badge:hover { text-decoration: none; background: var(--primary); color: #f
 
 /* ---------------------------------------------------------------- Login */
 .login-body {
-    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center;
     background: radial-gradient(80% 60% at 20% 10%, rgba(124,116,255,0.35), transparent 60%),
                 radial-gradient(60% 50% at 90% 90%, rgba(167,139,250,0.25), transparent 60%),
                 #101426;
-    overflow: hidden; position: relative;
+    background-attachment: fixed;
+    overflow: hidden; position: relative; overscroll-behavior: none;
 }
-.login-staff { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 22px; transform: rotate(-8deg) scale(1.3); opacity: 0.08; pointer-events: none; }
+html:has(.login-body) { overflow: hidden; overscroll-behavior: none; height: 100%; }
+.login-staff { position: fixed; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 22px; transform: rotate(-8deg) scale(1.3); opacity: 0.08; pointer-events: none; }
 .login-staff span { display: block; height: 1.5px; background: #fff; }
 .login-container { width: 100%; max-width: 400px; padding: 1rem; position: relative; }
 .login-card {
