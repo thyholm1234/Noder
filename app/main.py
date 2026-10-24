@@ -71,6 +71,7 @@ app.include_router(user.router, prefix="/user", dependencies=[Depends(verify_csr
 async def login_required(request: Request, exc: LoginRequired):
     if "text/html" not in request.headers.get("accept", ""):
         return JSONResponse({"detail": "Log ind igen"}, status_code=401)
+    request.session.clear()  # ugyldig session må ikke sende /login tilbage til dashboardet (redirect-løkke)
     return RedirectResponse("/login", status_code=303)
 
 

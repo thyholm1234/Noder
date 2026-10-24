@@ -133,6 +133,7 @@ class LoginRequired(Exception):
 def admin_required(request: Request):
     """Choir-leader guard used by the handlers (the router dependency has already validated the session)."""
     if request.session.get("role") != "admin" or not request.session.get("admin_id"):
+        request.session.clear()
         return RedirectResponse("/login", status_code=303)
     return None
 
