@@ -5,6 +5,13 @@
 
 {% block title %}{{ choir.name }} - Noder{% endblock %}
 
+{% macro song_tile(song) %}
+<label class="check-tile" data-search="{{ song.title }} {{ song.composer or '' }} {{ song.tags or '' }}">
+    <input type="checkbox" name="song_id" value="{{ song.id }}">
+    <span><strong>{{ song.title }}</strong>{% if song.composer %}<small>{{ song.composer }}</small>{% endif %}</span>
+</label>
+{% endmacro %}
+
 {% block content %}
 <div class="page-header page-header--split">
     <div>
@@ -107,12 +114,7 @@
             <input type="search" placeholder="Filtrér sange…" data-filter="#assign-songs .check-tile" autocomplete="off">
         </div>
         <div class="check-grid">
-            {% for song in available_songs %}
-            <label class="check-tile" data-search="{{ song.title }} {{ song.composer or '' }} {{ song.tags or '' }}">
-                <input type="checkbox" name="song_id" value="{{ song.id }}">
-                <span><strong>{{ song.title }}</strong>{% if song.composer %}<small>{{ song.composer }}</small>{% endif %}</span>
-            </label>
-            {% endfor %}
+            {% for song in available_songs %}{{ song_tile(song) }}{% endfor %}
         </div>
         <div class="picker-actions">
             <button type="submit" class="btn btn-primary" data-count-label="Tildel {n} valgte">Tildel valgte</button>
@@ -250,30 +252,40 @@
         <p class="empty-state">Tom setliste — tilføj sange herunder.</p>
         {% endif %}
 
+        {% set addable = assigned_songs | rejectattr('id', 'in', in_list) | list %}
         <div class="setlist-add-controls">
-            <form method="post" action="/admin/choirs/{{ choir.id }}/setlists/{{ setlist.id }}/add" class="inline-form">
-                <select name="song_id" required>
-                    <option value="">Tilføj sang…</option>
-                    <optgroup label="Korets sange">
-                        {% for song in assigned_songs if song.id not in in_list %}
-                        <option value="{{ song.id }}">{{ song.title }}</option>
-                        {% endfor %}
-                    </optgroup>
-                    {% if available_songs %}
-                    <optgroup label="Andre sange (tildeles koret)">
-                        {% for song in available_songs %}
-                        <option value="{{ song.id }}">{{ song.title }}</option>
-                        {% endfor %}
-                    </optgroup>
-                    {% endif %}
-                </select>
-                <button type="submit" class="btn btn-sm btn-primary">{{ icon('plus', 14) }} Sang</button>
-            </form>
+            {% if addable or available_songs %}
+            <button type="button" class="btn btn-sm btn-primary" data-toggle="#add-songs-{{ setlist.id }}">{{ icon('plus', 14) }} Tilføj sange</button>
+            {% endif %}
             <form method="post" action="/admin/choirs/{{ choir.id }}/setlists/{{ setlist.id }}/add-placeholder" class="inline-form">
                 <input type="text" name="title" placeholder="Separator, fx “Pause”" maxlength="255">
                 <button type="submit" class="btn btn-sm">{{ icon('minus', 14) }} Separator</button>
             </form>
         </div>
+
+        {% if addable or available_songs %}
+        <form method="post" action="/admin/choirs/{{ choir.id }}/setlists/{{ setlist.id }}/add" class="picker mt-1" id="add-songs-{{ setlist.id }}" hidden>
+            <div class="search-bar search-bar--sm">
+                {{ icon('search', 16) }}
+                <input type="search" placeholder="Filtrér sange…" data-filter="#add-songs-{{ setlist.id }} .check-tile" autocomplete="off">
+            </div>
+            {% if addable %}
+            <p class="field-hint picker-group">Korets sange</p>
+            <div class="check-grid">
+                {% for song in addable %}{{ song_tile(song) }}{% endfor %}
+            </div>
+            {% endif %}
+            {% if available_songs %}
+            <p class="field-hint picker-group">Andre sange (tildeles koret)</p>
+            <div class="check-grid">
+                {% for song in available_songs %}{{ song_tile(song) }}{% endfor %}
+            </div>
+            {% endif %}
+            <div class="picker-actions">
+                <button type="submit" class="btn btn-primary" data-count-label="Tilføj {n} valgte">Tilføj valgte</button>
+            </div>
+        </form>
+        {% endif %}
     </article>
     {{ export_dialog("export-" ~ setlist.id, setlist, "/admin/choirs/" ~ choir.id ~ "/setlists/" ~ setlist.id ~ "/export.pdf", setlist_pdf_parts[setlist.id]) }}
     {% else %}

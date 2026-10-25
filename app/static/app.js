@@ -176,17 +176,34 @@
         input.addEventListener('input', run);
     });
 
-    // "Tildel 3 valgte" — live count on multi-select pickers
+    // "Tildel 3 valgte" — live count on multi-select pickers. Counts checkboxes outside the form too
+    // (form="…" attribute); data-count-name limits it to one field, data-count-autohide hides the form at 0.
     $$('[data-count-label]').forEach((btn) => {
-        const form = btn.closest('form');
+        const form = btn.form;
         const base = btn.textContent;
+        const name = btn.dataset.countName;
         const update = () => {
-            const n = $$('input[type=checkbox]:checked', form).length;
+            const n = [...form.elements].filter((el) => el.type === 'checkbox' && el.checked && (!name || el.name === name)).length;
             btn.textContent = n ? btn.dataset.countLabel.replace('{n}', n) : base;
             btn.disabled = n === 0;
+            if ('countAutohide' in btn.dataset) form.hidden = n === 0;
         };
-        form.addEventListener('change', update);
+        document.addEventListener('change', update);
         update();
+    });
+
+    // "Select all" checkbox: <input type=checkbox data-check-all="selector">
+    $$('[data-check-all]').forEach((all) => {
+        const boxes = () => $$(all.dataset.checkAll);
+        all.addEventListener('change', () => {
+            boxes().forEach((b) => { if (!b.closest('[hidden]')) b.checked = all.checked; });
+        });
+        document.addEventListener('change', (e) => {
+            if (e.target === all || !boxes().includes(e.target)) return;
+            const checked = boxes().filter((b) => b.checked).length;
+            all.checked = checked === boxes().length;
+            all.indeterminate = checked > 0 && !all.checked;
+        });
     });
 
     // Keyboard: "/" focuses search; ←/→ follow data-hotkey links; space toggles the active audio

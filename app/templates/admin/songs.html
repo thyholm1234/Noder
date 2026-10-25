@@ -36,6 +36,19 @@
         <div class="table-meta">{{ total }} sang{{ 'e' if total != 1 else '' }}</div>
     </div>
 
+    {% if songs and choirs %}
+    <form method="post" action="/admin/songs/assign" class="picker bulk-bar mb-1" id="bulk-assign">
+        <input type="hidden" name="back" value="{{ request.url.path }}?{{ request.url.query }}">
+        <span class="field-hint">Tildel til</span>
+        <div class="choir-checkbox-list">
+            {% for choir in choirs %}
+            <label class="choir-checkbox-label"><input type="checkbox" name="choir_id" value="{{ choir.id }}"> {{ choir.name }}</label>
+            {% endfor %}
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary" data-count-label="Tildel {n} valgte" data-count-name="song_id" data-count-autohide>Tildel valgte</button>
+    </form>
+    {% endif %}
+
     {% macro sort_url(col) %}/admin/songs?sort={{ col }}&order={{ 'asc' if (sort == col and order == 'desc') else 'desc' if sort == col else 'asc' }}&q={{ q | urlencode }}&page=1{% endmacro %}
     {% macro sort_icon(col) %}{% if sort == col %}{{ '▲' if order == 'asc' else '▼' }}{% else %}<span class="sort-icon-idle">⇅</span>{% endif %}{% endmacro %}
 
@@ -44,7 +57,8 @@
     <table class="table table-sortable table--stack">
         <thead>
             <tr>
-                <th><a href="{{ sort_url('title') }}" class="sort-link{% if sort == 'title' %} sort-active{% endif %}">Titel {{ sort_icon('title') }}</a></th>
+                <th>{% if choirs %}<input type="checkbox" class="row-check" data-check-all="[form=bulk-assign][name=song_id]" title="Vælg alle på siden" aria-label="Vælg alle på siden">{% endif %}
+                    <a href="{{ sort_url('title') }}" class="sort-link{% if sort == 'title' %} sort-active{% endif %}">Titel {{ sort_icon('title') }}</a></th>
                 <th><a href="{{ sort_url('composer') }}" class="sort-link{% if sort == 'composer' %} sort-active{% endif %}">Komponist {{ sort_icon('composer') }}</a></th>
                 <th><a href="{{ sort_url('tags') }}" class="sort-link{% if sort == 'tags' %} sort-active{% endif %}">Tags {{ sort_icon('tags') }}</a></th>
                 <th>Filer</th>
@@ -58,7 +72,8 @@
             {% set pdf_count = song.files | selectattr('file_type', 'eq', 'pdf') | list | length %}
             {% set audio_count = song.files | selectattr('file_type', 'eq', 'audio') | list | length %}
             <tr>
-                <td><a href="/admin/songs/{{ song.id }}" class="strong-link">{{ song.title }}</a></td>
+                <td>{% if choirs %}<input type="checkbox" class="row-check" name="song_id" value="{{ song.id }}" form="bulk-assign" aria-label="Vælg {{ song.title }}">{% endif %}
+                    <a href="/admin/songs/{{ song.id }}" class="strong-link">{{ song.title }}</a></td>
                 <td class="muted" data-label="Komponist">{{ song.composer or '—' }}</td>
                 <td data-label="Tags">
                     {% if song.tags %}

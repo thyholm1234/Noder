@@ -479,11 +479,45 @@ async def songs_list(
     data_stmt = data_stmt.where(filter_clause)
 
     songs = (await db.execute(data_stmt)).scalars().all()
+    choirs = (await db.execute(
+        select(Choir).where(Choir.owner_id == admin_id(request)).order_by(Choir.name))).scalars().all()
 
     return render(
         request, "admin/songs.html",
-        songs=songs, q=q, sort=sort, order=order, page=page, total_pages=total_pages, total=total,
+        songs=songs, choirs=choirs, q=q, sort=sort, order=order, page=page, total_pages=total_pages, total=total,
     )
+
+
+@router.post("/songs/assign")
+async def songs_bulk_assign(request: Request, db: AsyncSession = Depends(get_db)):
+    """Assign several songs to one or more choirs in one go (from the song list)."""
+    if redirect := admin_required(request):
+        return redirect
+
+    form = await request.form()
+    back = form.get("back", "")
+    back = back if str(back).startswith("/admin/songs") else "/admin/songs"
+    song_ids = await own_song_ids(db, request, {int(v) for v in form.getlist("song_id") if str(v).isdigit()})
+    choir_ids = await own_choir_ids(db, request, {int(v) for v in form.getlist("choir_id") if str(v).isdigit()})
+    if not song_ids or not choir_ids:
+        flash(request, "Vælg både sange og mindst ét kor", "error")
+        return go(back)
+
+    existing = set((await db.execute(
+        select(ChoirSong.choir_id, ChoirSong.song_id)
+        .where(ChoirSong.choir_id.in_(choir_ids), ChoirSong.song_id.in_(song_ids))
+    )).tuples())
+    new_pairs = {(c, s) for c in choir_ids for s in song_ids} - existing
+    for choir_id, song_id in new_pairs:
+        db.add(ChoirSong(choir_id=choir_id, song_id=song_id))
+    await db.commit()
+
+    n = len({s for _, s in new_pairs})
+    if n:
+        flash(request, f"{n} sang{'e' if n != 1 else ''} tildelt {len(choir_ids)} kor")
+    else:
+        flash(request, "De valgte sange var allerede tildelt")
+    return go(back)
 
 
 @router.post("/songs")
