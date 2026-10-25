@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 {% from "_export_dialog.html" import export_dialog %}
+{% from "_macros.html" import setlist_card, song_card %}
 {% set active = "choirs" %}
 
 {% block title %}{{ choir.name }} - Noder{% endblock %}
@@ -29,19 +30,66 @@
         </form>
         <p class="subtitle">Oprettet {{ choir.created_at.strftime('%d/%m/%Y') }}</p>
     </div>
-    <div class="header-actions">
-        <a href="/admin/choirs/{{ choir.id }}/preview" class="btn">{{ icon('eye', 16) }} Se som medlem</a>
-    </div>
 </div>
 
-<nav class="section-nav">
+<nav class="section-nav" data-panel-nav>
+    <a href="#overview">{{ icon('eye', 15) }} Oversigt</a>
     <a href="#members">{{ icon('user', 15) }} Medlemmer <span class="count">{{ users | length }}</span></a>
     <a href="#songs">{{ icon('music', 15) }} Sange <span class="count">{{ choir_songs | length }}</span></a>
     <a href="#setlists">{{ icon('list', 15) }} Setlister <span class="count">{{ setlists | length }}</span></a>
 </nav>
 
+<!-- Overview: what the members see -->
+<div id="overview" data-panel>
+{% if next_setlist %}
+<p class="subtitle mb-1">Næste gang: <strong>{{ next_setlist.name }}</strong> · {{ next_setlist.event_date | danish_date }}</p>
+{% endif %}
+
+{% if highlighted %}
+<section class="card card--highlight">
+    <div class="card-head"><h2>{{ icon('star') }} I fokus lige nu</h2></div>
+    <div class="song-grid">
+        {% for song, cs in highlighted %}
+        {{ song_card(song, "/admin/songs/" ~ song.id, highlight=true, note="Til " ~ (cs.highlight_end | danish_date)) }}
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% set visible = setlists | selectattr('items') | list %}
+{% if visible %}
+<section class="card">
+    <div class="card-head"><h2>{{ icon('list') }} Setlister</h2></div>
+    <div class="song-grid">
+        {% for setlist in visible %}
+        {{ setlist_card(setlist, "#setlist-" ~ setlist.id, is_next=(next_setlist and setlist.id == next_setlist.id)) }}
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<section class="card">
+    <div class="card-head">
+        <h2>{{ icon('music') }} Alle sange <span class="count">{{ choir_songs | length }}</span></h2>
+        <a href="#songs" class="btn btn-sm">{{ icon('edit', 14) }} Redigér</a>
+    </div>
+    {% if choir_songs %}
+    <div class="song-grid">
+        {% for cs in choir_songs %}
+        {{ song_card(cs.song, "/admin/songs/" ~ cs.song.id, note="Tilføjet " ~ cs.assigned_at.strftime('%d/%m/%Y'), show_files=true) }}
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state-large">
+        <div class="empty-icon">{{ icon('music', 48) }}</div>
+        <p>Ingen sange tildelt endnu. <a href="#songs">Tildel sange</a></p>
+    </div>
+    {% endif %}
+</section>
+</div>
+
 <!-- Members -->
-<section class="card" id="members">
+<section class="card" id="members" data-panel>
     <div class="card-head">
         <h2>{{ icon('user') }} Medlemmer</h2>
         <button type="button" class="btn btn-sm" data-toggle="#bulk-users">{{ icon('users', 14) }} Tilføj flere på én gang</button>
@@ -99,7 +147,7 @@
 </section>
 
 <!-- Songs -->
-<section class="card" id="songs">
+<section class="card" id="songs" data-panel>
     <div class="card-head">
         <h2>{{ icon('music') }} Sange</h2>
         {% if available_songs %}
@@ -165,7 +213,7 @@
 </section>
 
 <!-- Setlists -->
-<section class="card" id="setlists">
+<section class="card" id="setlists" data-panel>
     <div class="card-head"><h2>{{ icon('list') }} Setlister</h2></div>
 
     <form method="post" action="/admin/choirs/{{ choir.id }}/setlists" class="inline-form mb-2">
@@ -184,6 +232,7 @@
                 <div class="setlist-sub">
                     {% if setlist.event_date %}<span class="pill{% if not past %} pill--accent{% endif %}">{{ icon('calendar', 12) }} {{ setlist.event_date | danish_date }}</span>{% endif %}
                     <span class="muted">{{ in_list | select | list | length }} sange</span>
+                    <button type="button" class="btn btn-sm btn-ghost" data-toggle="#setlist-body-{{ setlist.id }}">{{ icon('list', 14) }} Sange</button>
                 </div>
             </div>
             <div class="setlist-actions">
@@ -221,6 +270,7 @@
             <button type="submit" class="btn btn-sm btn-primary">{{ icon('copy', 14) }} Kopiér</button>
         </form>
 
+        <div class="setlist-body" id="setlist-body-{{ setlist.id }}"{% if setlists | length != 1 %} hidden{% endif %}>
         {% if setlist.notes %}<p class="setlist-notes">{{ setlist.notes }}</p>{% endif %}
 
         {% if setlist.items %}
@@ -290,6 +340,7 @@
             </div>
         </form>
         {% endif %}
+        </div>
     </article>
     {{ export_dialog("export-" ~ setlist.id, setlist, "/admin/choirs/" ~ choir.id ~ "/setlists/" ~ setlist.id ~ "/export.pdf", setlist_pdf_parts[setlist.id]) }}
     {% else %}

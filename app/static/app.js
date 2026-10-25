@@ -448,6 +448,35 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initSetlists);
     else initSetlists();
 
+    // ------------------------------------------------------------------
+    // Choir page: one panel at a time, driven by the URL hash (#songs, #setlist-3, …).
+    // Without JS every panel simply stays visible.
+    // ------------------------------------------------------------------
+    const panelNav = $('[data-panel-nav]');
+    if (panelNav) {
+        const panels = $$('[data-panel]');
+        const links = $$('a[href^="#"]', panelNav);
+        const showPanel = () => {
+            const id = decodeURIComponent(location.hash.slice(1));
+            const target = id ? document.getElementById(id) : null;
+            const panel = target?.closest('[data-panel]') || panels[0];
+            panels.forEach((p) => { p.hidden = p !== panel; });
+            links.forEach((a) => {
+                const on = a.getAttribute('href') === '#' + panel.id;
+                a.classList.toggle('active', on);
+                on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');
+            });
+            if (target?.classList.contains('setlist-card')) {
+                const body = $('.setlist-body', target);
+                if (body) body.hidden = false;
+            }
+            if (target && target !== panel) target.scrollIntoView({ block: 'start' });
+            else if (!location.hash || target === panel) window.scrollTo(0, 0);
+        };
+        window.addEventListener('hashchange', showPanel);
+        showPanel();
+    }
+
     $$('[data-rename-url]').forEach((el) => {
         let original = el.textContent.trim();
         el.addEventListener('keydown', (e) => {

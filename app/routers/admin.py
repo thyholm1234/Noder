@@ -207,7 +207,7 @@ async def choir_detail(request: Request, choir_id: int, db: AsyncSession = Depen
         select(Choir)
         .options(
             selectinload(Choir.users),
-            selectinload(Choir.choir_songs).selectinload(ChoirSong.song),
+            selectinload(Choir.choir_songs).selectinload(ChoirSong.song).selectinload(Song.files),
             selectinload(Choir.setlists).selectinload(Setlist.items).selectinload(SetlistItem.song)
             .selectinload(Song.files),
         )
@@ -224,10 +224,17 @@ async def choir_detail(request: Request, choir_id: int, db: AsyncSession = Depen
     assigned_songs = sorted((cs.song for cs in choir.choir_songs), key=lambda s: s.title.lower())
     choir_songs = sorted(choir.choir_songs, key=lambda cs: cs.song.title.lower())
     setlists = sorted(choir.setlists, key=setlist_sort_key)
+    today = date.today()
+    highlighted = [
+        (cs.song, cs) for cs in choir_songs
+        if cs.highlight_start and cs.highlight_end and cs.highlight_start <= today <= cs.highlight_end
+    ]
 
     return render(
         request, "admin/choir_detail.html",
         choir=choir,
+        highlighted=highlighted,
+        next_setlist=next_event([sl for sl in setlists if sl.items]),
         users=sorted(choir.users, key=lambda u: u.username.lower()),
         choir_songs=choir_songs,
         available_songs=available_songs,
@@ -1016,39 +1023,8 @@ async def setlist_export(request: Request, choir_id: int, setlist_id: int, db: A
 
 
 # ---------------------------------------------------------------------------
-# Admin preview of choir member dashboard
+# The member view is now the "Oversigt" tab on the choir page
 # ---------------------------------------------------------------------------
-@router.get("/choirs/{choir_id}/preview", response_class=HTMLResponse)
-async def choir_preview(request: Request, choir_id: int, db: AsyncSession = Depends(get_db)):
-    if redirect := admin_required(request):
-        return redirect
-
-    choir = await own_choir(db, request, choir_id)
-    if not choir:
-        return go("/admin/choirs")
-
-    today = date.today()
-    rows = (await db.execute(
-        select(Song, ChoirSong)
-        .join(ChoirSong, ChoirSong.song_id == Song.id)
-        .where(ChoirSong.choir_id == choir_id)
-        .order_by(Song.title)
-    )).all()
-
-    songs, highlighted = [], []
-    for song, cs in rows:
-        songs.append((song, cs.assigned_at))
-        if cs.highlight_start and cs.highlight_end and cs.highlight_start <= today <= cs.highlight_end:
-            highlighted.append((song, cs))
-
-    setlists = (await db.execute(
-        select(Setlist)
-        .options(selectinload(Setlist.items).selectinload(SetlistItem.song))
-        .where(Setlist.choir_id == choir_id)
-    )).scalars().all()
-    setlists = sorted(setlists, key=setlist_sort_key)
-
-    return render(
-        request, "admin/choir_preview.html",
-        choir=choir, songs=songs, highlighted=highlighted, setlists=setlists, next_setlist=next_event(setlists),
-    )
+@router.get("/choirs/{choir_id}/preview")
+async def choir_preview(choir_id: int):
+    return go(f"/admin/choirs/{choir_id}")
