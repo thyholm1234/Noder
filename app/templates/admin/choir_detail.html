@@ -242,6 +242,10 @@
                       contenteditable="true" spellcheck="false" title="Klik for at redigere"
                       data-rename-url="/admin/choirs/{{ choir.id }}/setlists/{{ setlist.id }}/items/{{ item.id }}/rename">{{ item.placeholder_text }}</span>
                 {% endif %}
+                <span class="move-btns">
+                    <button type="button" class="btn btn-sm btn-ghost btn-icon" data-move="up" title="Flyt op" aria-label="Flyt op">{{ icon('chevron-left', 14) }}</button>
+                    <button type="button" class="btn btn-sm btn-ghost btn-icon" data-move="down" title="Flyt ned" aria-label="Flyt ned">{{ icon('chevron-right', 14) }}</button>
+                </span>
                 <form method="post" action="/admin/choirs/{{ choir.id }}/setlists/{{ setlist.id }}/remove-item/{{ item.id }}" class="inline">
                     <button type="submit" class="btn btn-sm btn-ghost btn-icon" title="Fjern">{{ icon('x', 14) }}</button>
                 </form>

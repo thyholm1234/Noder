@@ -575,6 +575,8 @@ a.tag-badge:hover { text-decoration: none; background: var(--primary); color: #f
 .drag-handle { color: var(--text-light); cursor: grab; display: grid; place-items: center; padding: 0.15rem; border-radius: 5px; touch-action: none; }
 .drag-handle:hover { background: var(--bg-soft); color: var(--text); }
 .drag-handle:active { cursor: grabbing; }
+.move-btns { display: inline-flex; }
+.move-btns svg { transform: rotate(90deg); } /* ‹ → ˄, › → ˅ */
 .setlist-item-num {
     display: grid; place-items: center; width: 1.5rem; height: 1.5rem; flex-shrink: 0; border-radius: 50%;
     background: var(--primary-soft); color: var(--primary-text); font-size: 0.74rem; font-weight: 700;

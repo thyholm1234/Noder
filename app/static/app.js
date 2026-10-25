@@ -409,22 +409,44 @@
             if (num) num.textContent = ++n;
         });
     }
-    $$('[data-sortable-url]').forEach((list) => {
+    function saveOrder(list) {
         renumber(list);
-        if (!window.Sortable) return;
-        new Sortable(list, {
-            animation: 160,
-            handle: '.drag-handle',
-            ghostClass: 'is-ghost',
-            onEnd() {
-                renumber(list);
-                const order = $$('[data-item-id]', list).map((el) => el.dataset.itemId);
-                noderPost(list.dataset.sortableUrl, { order })
-                    .then(() => toast('Rækkefølge gemt'))
-                    .catch(() => toast('Kunne ikke gemme rækkefølgen — genindlæs siden', 'error'));
-            },
+        const order = $$('[data-item-id]', list).map((el) => el.dataset.itemId);
+        noderPost(list.dataset.sortableUrl, { order })
+            .then(() => toast('Rækkefølge gemt'))
+            .catch(() => toast('Kunne ikke gemme rækkefølgen — genindlæs siden', 'error'));
+    }
+    // Sortable.min.js is loaded after this file, so wait until every script has run.
+    // Drag handles work with mouse, touch and pen; the arrow buttons work everywhere (keyboard, screen readers, no Sortable).
+    function initSetlists() {
+        $$('[data-sortable-url]').forEach((list) => {
+            renumber(list);
+            if (window.Sortable) {
+                new Sortable(list, {
+                    animation: 160,
+                    handle: '.drag-handle',
+                    ghostClass: 'is-ghost',
+                    fallbackTolerance: 3,
+                    delayOnTouchOnly: true,
+                    touchStartThreshold: 3,
+                    onEnd: () => saveOrder(list),
+                });
+            }
+            list.addEventListener('click', (e) => {
+                const btn = e.target.closest('[data-move]');
+                if (!btn) return;
+                const item = btn.closest('.setlist-item-card');
+                const dir = btn.dataset.move === 'up' ? -1 : 1;
+                const other = dir < 0 ? item.previousElementSibling : item.nextElementSibling;
+                if (!other) return;
+                dir < 0 ? list.insertBefore(item, other) : list.insertBefore(other, item);
+                saveOrder(list);
+                btn.focus();
+            });
         });
-    });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initSetlists);
+    else initSetlists();
 
     $$('[data-rename-url]').forEach((el) => {
         let original = el.textContent.trim();
